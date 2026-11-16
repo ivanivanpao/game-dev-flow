@@ -83,6 +83,10 @@ async function main() {
     camera.position.copy(target).addScaledVector(dir, dist);
     camera.up.set(...(v.up || [0, 1, 0]));
     controls.target.copy(target); camera.lookAt(target); controls.update();
+    // 可視距離隨模型大小放大（實際比例的賽道等大型模型才不會被遠裁切面切掉）；near 等比放大以保住深度精度，小模型維持 0.01～100
+    const need = (camera.position.distanceTo(c) + size.length() / 2) * 1.5;
+    camera.far = Number.isFinite(need) ? Math.max(100, need) : 100;
+    camera.near = camera.far / 10000; camera.updateProjectionMatrix();
     axes.visible = v.axes !== false; human.visible = v.human !== false; bboxHelper.visible = !!v.bbox;
   }
 
