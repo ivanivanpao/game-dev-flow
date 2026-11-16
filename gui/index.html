@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>遊戲開發流程</title>
+<style>
+:root{--bg:#f4f5f7;--panel:#fff;--text:#1d2329;--muted:#65707c;--line:#dde1e6;--accent:#2f6fde;--accent-text:#fff;--ok:#1f8a4c;--warn:#b26a00;--bad:#c0392b;--code:#f0f2f5;--sel:#e7effc}
+@media (prefers-color-scheme: dark){:root{--bg:#15181c;--panel:#1e2228;--text:#e4e7eb;--muted:#9aa4ae;--line:#323840;--accent:#5b8ff0;--accent-text:#fff;--ok:#4cc27d;--warn:#e6a23c;--bad:#ef6b5b;--code:#262b32;--sel:#26354d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif;padding-bottom:46px}
+header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:17px;margin:0}
+nav{display:flex;gap:4px;padding:8px 18px 0;flex-wrap:wrap}
+nav button{border:1px solid var(--line);border-bottom:none;background:transparent;color:var(--muted);padding:7px 14px;border-radius:8px 8px 0 0;cursor:pointer;font:inherit}
+nav button.on{background:var(--panel);color:var(--text);font-weight:600}
+main{background:var(--panel);border-top:1px solid var(--line);min-height:calc(100vh - 140px);padding:18px}
+section{display:none}section.on{display:block}
+h2{font-size:16px;margin:0 0 10px}h3{font-size:14px;margin:18px 0 8px}
+.card{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--panel)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cols{display:grid;grid-template-columns:220px 1fr;gap:16px}
+@media (max-width:800px){.cols{grid-template-columns:1fr}}
+button.b{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 12px;border-radius:7px;cursor:pointer;font:inherit}
+button.b:hover{border-color:var(--accent)}
+button.p{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+button.d{color:var(--bad)}
+button:disabled{opacity:.5;cursor:not-allowed}
+input[type=text],input[type=number],textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 9px}
+input[type=number]{width:80px}
+textarea.ed{width:100%;min-height:420px;font:13px/1.55 Consolas,"Cascadia Mono",monospace;resize:vertical;tab-size:2}
+.muted{color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
+.tag.ok{border-color:var(--ok)}.tag.warn{border-color:var(--warn)}.tag.bad{border-color:var(--bad)}
+table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+.list button{display:block;width:100%;text-align:left;margin-bottom:4px}
+.list button.on{background:var(--sel);border-color:var(--accent)}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.tabs button{font-size:13px;padding:4px 10px}
+.tabs button.on{background:var(--sel);border-color:var(--accent)}
+.help{font-size:13px;color:var(--muted);margin:4px 0 8px}
+.notice{padding:8px 12px;border-radius:8px;border:1px solid var(--warn);margin:8px 0;font-size:13px}
+.notice.bad{border-color:var(--bad)}
+.md{line-height:1.7}.md pre{background:var(--code);padding:10px;border-radius:8px;overflow:auto}.md code{background:var(--code);padding:1px 5px;border-radius:4px}.md pre code{padding:0;background:none}
+.md table{width:auto}.md blockquote{margin:0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.shots figure{margin:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.shots img{width:100%;display:block;cursor:zoom-in}.shots figcaption{padding:6px 8px;font-size:12px}
+#console{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);z-index:5}
+#console .bar{display:flex;gap:10px;align-items:center;padding:8px 18px;cursor:pointer}
+#console pre{margin:0;max-height:38vh;overflow:auto;padding:8px 18px 12px;font:12px/1.5 Consolas,monospace;display:none;white-space:pre-wrap}
+#console.open pre{display:block}
+.form{display:grid;grid-template-columns:200px 1fr;gap:8px 14px;align-items:center}
+.form .h{grid-column:1/-1;font-weight:600;margin-top:10px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.form .note{grid-column:2;font-size:12px;color:var(--muted);margin-top:-6px}
+@media (max-width:700px){.form{grid-template-columns:1fr}.form .note{grid-column:1}}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:18px;max-width:92vw}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+#zoom img{max-width:88vw;max-height:84vh;display:block}
+</style>
+</head>
+<body>
+<header>
+  <h1>遊戲開發流程</h1>
+  <span id="env"></span>
+  <span style="flex:1"></span>
+  <button class="b" onclick="refreshAll()">重新整理</button>
+</header>
+<nav id="nav">
+  <button data-tab="overview" class="on">總覽</button>
+  <button data-tab="models">① 模型工坊</button>
+  <button data-tab="game">② 遊戲整合</button>
+  <button data-tab="runs">執行紀錄</button>
+  <button data-tab="settings">設定</button>
+  <button data-tab="advanced">進階</button>
+</nav>
+<main>
+  <!-- 總覽 -->
+  <section id="overview" class="on">
+    <div id="ov-error"></div>
+    <div class="card"><h2>下一步</h2><div id="ov-next"></div></div>
+    <div class="card"><h2>模型</h2><div id="ov-models"></div></div>
+    <div class="card"><h2>遊戲</h2><div id="ov-game"></div></div>
+  </section>
+
+  <!-- 模型工坊 -->
+  <section id="models">
+    <div class="cols">
+      <div>
+        <div class="list" id="m-list"></div>
+        <button class="b" style="width:100%" onclick="document.getElementById('dlg-new').showModal()">＋ 新增模型</button>
+      </div>
+      <div id="m-detail"><p class="muted">從左邊選一個模型。</p></div>
+    </div>
+  </section>
+
+  <!-- 遊戲整合 -->
+  <section id="game">
+    <div id="g-status"></div>
+    <div class="card">
+      <h2>執行</h2>
+      <div class="row">
+        最多 <input type="number" id="g-rounds" min="1" max="50" placeholder="設定值"> 輪
+        <label><input type="checkbox" id="g-dry"> 乾跑（不呼叫 AI，只測流程）</label>
+        <button class="b p" onclick="runGame()">開始做遊戲</button>
+        <button class="b" onclick="cmd({cmd:'gates'})">只跑關卡（不呼叫 AI）</button>
+      </div>
+      <p class="muted">「開始做遊戲」：AI 反覆修改你的遊戲程式，直到通過或跑滿輪數。AI 只在新分支 <code>auto/&lt;時間&gt;</code> 上改，結束後遊戲資料夾會切回你原本的分支。開始前遊戲資料夾不能有還沒 commit 的修改。</p>
+      <h3>新增一條遊戲驗收規則</h3>
+      <div class="row"><input type="text" id="g-check" style="flex:1;min-width:240px" placeholder="寫成看圖就能判斷的一句話，例如：樹不能懸空">
+        <button class="b" onclick="addCheck(null,'g-check')">加入清單</button></div>
+    </div>
+    <div class="card"><h2>你要寫的檔案</h2><div id="g-editor"></div></div>
+  </section>
+
+  <!-- 執行紀錄 -->
+  <section id="runs">
+    <div class="cols">
+      <div class="list" id="r-list"></div>
+      <div id="r-detail"><p class="muted">從左邊選一筆紀錄。</p></div>
+    </div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="settings">
+    <div class="card">
+      <div class="form" id="s-form"></div>
+      <div class="row" style="margin-top:14px"><button class="b p" onclick="saveSettings()">儲存設定</button><span id="s-msg" class="muted"></span></div>
+    </div>
+  </section>
+
+  <!-- 進階 -->
+  <section id="advanced">
+    <p class="help">這些是流程本身的檔案。通常不用改；想調整 AI 角色的行為或規則時才改。</p>
+    <div class="card"><div id="a-editor"></div></div>
+  </section>
+</main>
+
+<div id="console">
+  <div class="bar" onclick="this.parentNode.classList.toggle('open')">
+    <b>工作</b><span id="c-state" class="muted">沒有工作在跑</span><span style="flex:1"></span>
+    <button class="b d" id="c-stop" style="display:none" onclick="event.stopPropagation();stopJob()">停止</button>
+    <span class="muted">點這裡展開／收合</span>
+  </div>
+  <pre id="c-log"></pre>
+</div>
+
+<dialog id="dlg-new">
+  <h2>新增模型</h2>
+  <div class="form" style="grid-template-columns:120px 260px">
+    <label>代號（英文）</label><input type="text" id="n-name" placeholder="例如 hammer">
+    <label>中文名稱</label><input type="text" id="n-title" placeholder="例如 鐵鎚">
+    <label></label><label><input type="checkbox" id="n-uses" checked> 遊戲會用到它</label>
+  </div>
+  <p class="help">會建立 models/代號/ 與待填的 spec.md、spec.json、checklist.md。model.js 由 AI 第一輪自己寫。</p>
+  <div class="row"><button class="b p" onclick="newModel()">建立</button><button class="b" onclick="this.closest('dialog').close()">取消</button></div>
+</dialog>
+<dialog id="zoom" onclick="this.close()"><img id="zoom-img" alt=""></dialog>
+
+<script>
+const TOKEN = '__TOKEN__';
+const CLAUDE_MODELS = ['claude-fable-5-2', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
+let OV = null, CUR_MODEL = null, CUR_RUN = null;
+
+// ---------- 小工具 ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {headers: {'X-Token': TOKEN}} :
+    {method: 'POST', headers: {'X-Token': TOKEN, 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({error: '伺服器回應格式錯誤'}));
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const wsUrl = rel => '/ws/' + rel.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent(TOKEN);
+function flash(el, msg, cls = 'ok') { el.textContent = msg; el.className = cls; setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000); }
+
+// 極簡 Markdown 轉換：標題、清單、表格、程式碼區塊、引用、粗體、行內程式碼（先跳脫 HTML，避免注入）
+function md(src) {
+  const lines = String(src).replace(/\r/g, '').split('\n'); let out = [], i = 0;
+  const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  while (i < lines.length) {
+    let l = lines[i];
+    if (l.startsWith('```')) { const buf = []; i++; while (i < lines.length && !lines[i].startsWith('```')) buf.push(lines[i++]); i++; out.push('<pre><code>' + esc(buf.join('\n')) + '</code></pre>'); continue; }
+    let m = l.match(/^(#{1,6})\s+(.*)/); if (m) { out.push(`<h${Math.min(m[1].length + 1, 6)}>${inline(m[2])}</h${Math.min(m[1].length + 1, 6)}>`); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l)) { const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      let h = '<table><tr>' + cells(rows[0]).map(c => '<th>' + inline(c) + '</th>').join('') + '</tr>';
+      rows.slice(/^[\s|:-]+$/.test(rows[1] || '') ? 2 : 1).forEach(r => h += '<tr>' + cells(r).map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>');
+      out.push(h + '</table>'); continue; }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) { const buf = []; while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) buf.push('<li>' + inline(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, '')) + '</li>'); out.push('<ul>' + buf.join('') + '</ul>'); continue; }
+    if (l.startsWith('>')) { const buf = []; while (i < lines.length && lines[i].startsWith('>')) buf.push(inline(lines[i++].replace(/^>\s?/, ''))); out.push('<blockquote>' + buf.join('<br>') + '</blockquote>'); continue; }
+    if (l.trim() === '') { i++; continue; }
+    const buf = []; while (i < lines.length && lines[i].trim() !== '' && !/^(#|```|>|\s*[-*]\s|\s*\d+\.\s|\s*\|)/.test(lines[i])) buf.push(inline(lines[i++]));
+    if (!buf.length) buf.push(inline(lines[i++]));
+    out.push('<p>' + buf.join('<br>') + '</p>');
+  }
+  return out.join('\n');
+}
+
+// ---------- 檔案編輯器（分頁、存檔、預覽）----------
+const HELP = {
+  'prompt.md': '遊戲設計文件：場景是什麼、限制、效能目標、怎麼自我驗證。第一次做遊戲時寫一次。',
+  'TASK.md': '這一輪要做或修什麼，以及怎樣才算完成。每次做遊戲前更新。完成標準越具體越好。',
+  'human-feedback.md': '你試玩後的意見，下一輪會原封不動交給遊戲開發者。',
+  'checks/visual-checklist.md': '遊戲畫面的驗收清單（只增不減）。視覺審查者每一輪都逐條檢查。',
+  'checks/model-checklist.md': '所有模型共通的驗收清單。',
+  'spec.md': '模型規格（給人和 AI 看的文字）：長什麼樣、用途、座標約定、不可以什麼。寫成看圖就能判斷的句子。',
+  'spec.json': '客觀檢查條件（尺寸範圍、三角形上限…）與截圖角度。程式會自動檢查，不靠 AI。',
+  'checklist.md': '這個模型專屬的驗收清單（只增不減）。你每抓到一個錯就加一條。',
+  'model-human-feedback.md': '你看過模型後的意見，下一輪會交給模型開發者。',
+  'model.js': '模型程式。由 AI 負責，介面上只能看不能改。',
+  'reopen.md': '遊戲階段退回來的缺陷。下次做這個模型時 AI 會看到，通過後會自動改名封存。',
+  'shots.json': '遊戲的截圖清單：每張從哪個鏡頭拍、應該看到什麼。是你寫的驗收標準，AI 不能改。',
+  'flow.config.json': '流程設定的原始檔。一般用「設定」分頁改就好。',
+};
+function helpFor(path) {
+  const base = path.split('/').pop();
+  if (path.startsWith('models/') && base === 'human-feedback.md') return HELP['model-human-feedback.md'];
+  if (path.startsWith('agents/')) return 'AI 角色的工作指令。協調器每次呼叫這個角色時，會把這份檔案交給它。';
+  return HELP[path] || HELP[base] || '';
+}
+
+function editor(host, files) {
+  host.innerHTML = `<div class="tabs"></div><div class="help"></div><div class="ph"></div>
+    <textarea class="ed" spellcheck="false"></textarea><div class="md" style="display:none"></div>
+    <div class="row" style="margin-top:8px"><button class="b p sv">儲存（Ctrl+S）</button><button class="b rl">重新載入</button>
+    <button class="b pv">預覽</button><span class="msg muted"></span><span class="ro muted"></span></div>`;
+  const tabs = host.querySelector('.tabs'), ta = host.querySelector('textarea'), pv = host.querySelector('.md'), msg = host.querySelector('.msg');
+  let cur = null, orig = '', writable = false;
+  const dirty = () => writable && ta.value !== orig;
+  files.forEach(f => { const b = document.createElement('button'); b.className = 'b'; b.textContent = f.label; b.onclick = () => open(f, b); tabs.appendChild(b); });
+  async function open(f, btn) {
+    if (dirty() && !confirm('這份檔案還沒存，確定要切換？')) return;
+    tabs.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+    cur = f; host.querySelector('.help').textContent = helpFor(f.path);
+    try {
+      const r = await api('/api/file?path=' + encodeURIComponent(f.path));
+      orig = r.content; ta.value = r.content; writable = r.writable;
+      ta.readOnly = !writable; host.querySelector('.sv').disabled = !writable;
+      host.querySelector('.ro').textContent = (writable ? '' : '唯讀') + (r.exists ? '' : '（檔案還不存在，存檔後建立）');
+      markPh();
+      if (pv.style.display !== 'none') renderPv();
+    } catch (e) { ta.value = ''; flash(msg, '讀取失敗：' + e.message, 'bad'); }
+  }
+  function markPh() {
+    host.querySelector('.ph').innerHTML = ta.value.includes('【') ? '<div class="notice">這份檔案還有【】範本文字沒填，請換成你的內容。</div>' : '';
+  }
+  function renderPv() { pv.innerHTML = cur && cur.path.endsWith('.md') ? md(ta.value) : '<pre>' + esc(ta.value) + '</pre>'; }
+  async function save() {
+    if (!cur || !writable) return;
+    try { await api('/api/file', {path: cur.path, content: ta.value}); orig = ta.value; flash(msg, '已儲存 ' + cur.path); markPh(); if (cur.onSave) cur.onSave(); }
+    catch (e) { flash(msg, e.message, 'bad'); }
+  }
+  host.querySelector('.sv').onclick = save;
+  host.querySelector('.rl').onclick = () => cur && open(cur, tabs.querySelector('.on'));
+  host.querySelector('.pv').onclick = () => { const show = pv.style.display === 'none'; pv.style.display = show ? 'block' : 'none'; ta.style.display = show ? 'none' : 'block'; host.querySelector('.pv').textContent = show ? '編輯' : '預覽'; if (show) renderPv(); };
+  ta.addEventListener('input', markPh);
+  ta.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
+    if (e.key === 'Tab' && !ta.readOnly) { e.preventDefault(); const s = ta.selectionStart; ta.setRangeText('  ', s, ta.selectionEnd, 'end'); }
+  });
+  if (files.length) open(files[0], tabs.querySelector('button'));
+  host._dirty = dirty;
+}
+window.addEventListener('beforeunload', e => { if ([...document.querySelectorAll('[data-ed]')].some(h => h._dirty && h._dirty())) { e.preventDefault(); e.returnValue = ''; } });
+
+// ---------- 分頁切換 ----------
+$('nav').onclick = e => {
+  const t = e.target.dataset.tab; if (!t) return;
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('main section').forEach(s => s.classList.toggle('on', s.id === t));
+  if (t === 'runs') loadRuns();
+  if (t === 'settings') loadSettings();
+};
+function goTab(t) { document.querySelector(`#nav button[data-tab="${t}"]`).click(); }
+
+// ---------- 總覽 ----------
+function runText(run) {
+  if (!run) return '<span class="muted">未跑過</span>';
+  const names = {approved: '通過', max_rounds: '輪數用完仍未通過', stalled: '卡住', running: '進行中（或中途被停止）'};
+  const cls = run.state === 'approved' ? 'ok' : (run.state === 'running' ? 'muted' : 'bad');
+  return `<span class="tag ${cls}">${names[run.state] || run.state}</span>` + (run.dry_run ? ' <span class="tag warn">乾跑</span>' : '') + ` <span class="muted">${run.rounds} 輪</span>`;
+}
+function relText(r) {
+  if (!r) return '<span class="muted">未發布</span>';
+  return `<span class="tag ok">v${r.version}</span>` + (r.dry_run ? ' <span class="tag warn">乾跑假發布</span>' : '') +
+    (r.tampered ? ' <span class="tag bad">發布檔被改動</span>' : '') + (r.newer ? ' <span class="tag warn">工坊版本比發布版新</span>' : '');
+}
+function nextSteps(o) {
+  const s = [];
+  const e = o.env;
+  if (!e.venv || !e.playwright) s.push(['bad', '介面不是用專案的 .venv 啟動，自動截圖會失敗。請關掉這個視窗，改用專案根目錄的 gui.bat 開啟。']);
+  if (!e.node_modules) s.push(['bad', '還沒安裝 npm 套件：在專案根目錄執行 npm install。']);
+  if (!e.claude) s.push(['warn', '找不到 claude 指令：真的跑 AI 需要先安裝 Claude Code（乾跑不需要）。']);
+  for (const m of o.models.filter(m => m.in_uses)) {
+    if (m.todo.length) s.push(['warn', `模型 <b>${esc(m.name)}</b> 的 ${m.todo.join('、')} 還有【】沒填 → 到「① 模型工坊」填寫。`]);
+    else if (m.reopen) s.push(['warn', `模型 <b>${esc(m.name)}</b> 被遊戲階段退件 → 到「① 模型工坊」重做。`]);
+    else if (!m.released && (!m.run || m.run.state !== 'approved')) s.push(['', `模型 <b>${esc(m.name)}</b> 還沒通過 → 到「① 模型工坊」按「開始做模型」。`]);
+    else if (!m.released && m.run.dry_run) s.push(['', `模型 <b>${esc(m.name)}</b> 只有乾跑通過（審查是假的）→ 拿掉乾跑再做一次才能發布。`]);
+    else if (!m.released) s.push(['', `模型 <b>${esc(m.name)}</b> 通過了 → 到「① 模型工坊」開檢視器看一看，滿意就按「發布」。`]);
+  }
+  const g = o.game;
+  if (!g.project_exists) s.push(['warn', `遊戲專案資料夾 <code>${esc(g.project_dir)}</code> 不存在 → 到「設定」填你的遊戲資料夾。`]);
+  else if (!g.shots_exists) s.push(['warn', `找不到截圖清單 <code>${esc(g.shots_spec)}</code> → 到「設定」確認路徑。`]);
+  if (o.todo.length) s.push(['warn', `${o.todo.join('、')} 還有【】沒填 → 到「② 遊戲整合」填寫。`]);
+  if (g.ready && g.project_exists && !o.todo.length) s.push(['ok', '模型都發布了 → 可以到「② 遊戲整合」開始做遊戲。']);
+  return s.length ? '<ul>' + s.map(([c, t]) => `<li class="${c}">${t}</li>`).join('') + '</ul>' : '<p class="muted">沒有待辦事項。</p>';
+}
+function envBadges(e) {
+  const b = (ok, t) => `<span class="tag ${ok ? 'ok' : 'bad'}" title="${ok ? '正常' : '有問題'}">${t}</span> `;
+  return b(e.venv && e.playwright, 'Python 環境') + b(e.node_modules, 'npm 套件') + b(e.claude, 'Claude Code');
+}
+async function loadOverview() {
+  try { OV = await api('/api/overview'); } catch (e) { $('ov-error').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+  if (OV.error) { $('ov-error').innerHTML = `<div class="notice bad">${esc(OV.error)}</div>`; return; }
+  $('ov-error').innerHTML = '';
+  $('env').innerHTML = envBadges(OV.env);
+  $('ov-next').innerHTML = nextSteps(OV);
+  $('ov-models').innerHTML = '<table><tr><th>模型</th><th>遊戲用到</th><th>最近一次製作</th><th>發布</th></tr>' +
+    OV.models.map(m => `<tr><td><a href="#" onclick="pickModel('${esc(m.name)}');goTab('models');return false">${esc(m.name)}</a>${m.reopen ? ' <span class="tag bad">被退件</span>' : ''}</td>
+      <td>${m.in_uses ? '是' : '<span class="muted">否</span>'}</td><td>${runText(m.run)}</td><td>${relText(m.released)}</td></tr>`).join('') + '</table>';
+  const g = OV.game;
+  $('ov-game').innerHTML = `<p>遊戲資料夾：<code>${esc(g.project_dir)}</code> ${g.project_exists ? '<span class="tag ok">存在</span>' : '<span class="tag bad">不存在</span>'}</p>
+    <p>能不能開工：${g.ready ? '<span class="tag ok">模型都已發布</span>' : '<span class="tag warn">還缺：' + esc(g.missing.join('、')) + '</span>'}</p>`;
+  $('g-status').innerHTML = (!g.project_exists ? `<div class="notice bad">遊戲資料夾 <code>${esc(g.project_dir)}</code> 不存在，做遊戲會失敗。到「設定」改「遊戲資料夾」。</div>` : '') +
+    (!g.ready ? `<div class="notice">還有模型沒發布（${esc(g.missing.join('、'))}），做遊戲會被擋下。</div>` : '');
+  renderModelList();
+}
+
+// ---------- 模型工坊 ----------
+function renderModelList() {
+  $('m-list').innerHTML = OV.models.map(m => `<button class="b ${m.name === CUR_MODEL ? 'on' : ''}" onclick="pickModel('${esc(m.name)}')">${esc(m.name)}
+    ${m.released ? '<span class="tag ok">v' + m.released.version + '</span>' : ''}${m.reopen ? ' <span class="tag bad">退件</span>' : ''}</button>`).join('');
+  if (CUR_MODEL) renderModelHead();
+}
+function pickModel(name) {
+  CUR_MODEL = name; renderModelList();
+  const m = OV.models.find(x => x.name === name);
+  $('m-detail').innerHTML = `<div id="m-head"></div>
+    <div class="card"><h2>你要寫的檔案</h2><div id="m-editor" data-ed></div></div>`;
+  renderModelHead();
+  const files = [{label: 'spec.md 規格', path: `models/${name}/spec.md`}, {label: 'spec.json 檢查條件', path: `models/${name}/spec.json`},
+    {label: 'checklist.md 專屬清單', path: `models/${name}/checklist.md`}, {label: 'human-feedback.md 你的意見', path: `models/${name}/human-feedback.md`},
+    {label: 'model.js（AI 寫的，唯讀）', path: `models/${name}/model.js`}];
+  if (m && m.reopen) files.push({label: 'reopen.md 退件內容（唯讀）', path: `models/${name}/reopen.md`});
+  files.forEach(f => f.onSave = loadOverview);
+  editor($('m-editor'), files);
+}
+function renderModelHead() {
+  const m = OV.models.find(x => x.name === CUR_MODEL); if (!m || !$('m-head')) return;
+  $('m-head').innerHTML = `<div class="card"><h2>模型：${esc(m.name)}</h2>
+    <p>最近一次製作：${runText(m.run)} ${m.run ? `<a href="#" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}');return false">看紀錄</a>` : ''}　發布：${relText(m.released)}</p>
+    ${m.todo.length ? `<div class="notice">${m.todo.join('、')} 還有【】沒填，AI 會照著範本文字做，請先填好。</div>` : ''}
+    ${m.reopen ? '<div class="notice bad">這個模型被遊戲階段退件，退件內容在下方「reopen.md」。重新做模型時 AI 會看到。</div>' : ''}
+    <h3>1. 讓 AI 做模型</h3>
+    <div class="row">最多 <input type="number" id="m-rounds" min="1" max="50" placeholder="設定值"> 輪
+      <label><input type="checkbox" id="m-dry"> 乾跑（不呼叫 AI，只測流程，不能發布）</label>
+      <button class="b p" onclick="runModel()">開始做模型</button></div>
+    <h3>2. 自己看</h3>
+    <div class="row"><button class="b" onclick="openLab()">開檢視器（可拖曳旋轉）</button>
+      ${m.run ? `<button class="b" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}')">看最近一次的截圖與審查意見</button>` : ''}</div>
+    <h3>3. 滿意就發布</h3>
+    <div class="row"><button class="b p" onclick="release()">發布</button>
+      <button class="b d" onclick="unrelease()" ${m.released ? '' : 'disabled'}>撤回發布</button>
+      <span class="muted">發布條件：最近一次製作通過、不是乾跑、通過後 model.js 沒被改過</span></div>
+    <h3>不滿意？</h3>
+    <p class="help">把意見寫進下方「human-feedback.md」再做一次；會一再出現的錯，存成永久規則：</p>
+    <div class="row"><input type="text" id="m-check" style="flex:1;min-width:240px" placeholder="例如：刀口要與握柄平行，不是垂直">
+      <button class="b" onclick="addCheck(CUR_MODEL,'m-check')">加入這個模型的清單</button></div></div>`;
+}
+async function runModel() {
+  const dry = $('m-dry').checked;
+  if (!dry && !confirm(`要真的呼叫 Claude 做模型 ${CUR_MODEL} 嗎？每一輪約呼叫 2 次，會花用量。`)) return;
+  await cmd({cmd: 'model', name: CUR_MODEL, rounds: $('m-rounds').value, dry});
+}
+async function openLab() {
+  try { const r = await api('/api/cmd', {cmd: 'lab', name: CUR_MODEL});
+    if (r.rc !== 0) return alert('檢視器建置失敗：\n' + r.output);
+    window.open(r.url, '_blank');
+  } catch (e) { alert(e.message); }
+}
+async function release() {
+  if (!confirm(`確定發布 ${CUR_MODEL}？發布後遊戲就會使用這個版本。`)) return;
+  quick({cmd: 'release', name: CUR_MODEL});
+}
+async function unrelease() {
+  if (!confirm(`確定撤回 ${CUR_MODEL} 的發布？遊戲階段會被擋下，直到重新發布。`)) return;
+  quick({cmd: 'unrelease', name: CUR_MODEL});
+}
+async function quick(body) {
+  try { const r = await api('/api/cmd', body); alert((r.rc === 0 ? '完成\n\n' : '失敗\n\n') + (r.output || '').trim()); }
+  catch (e) { alert(e.message); }
+  loadOverview();
+}
+async function addCheck(model, inputId) {
+  const text = $(inputId).value.trim(); if (!text) return;
+  try { const r = await api('/api/cmd', {cmd: 'add-check', text, model}); if (r.rc !== 0) return alert(r.output); $(inputId).value = ''; alert('已加入清單：' + text); }
+  catch (e) { alert(e.message); }
+}
+async function newModel() {
+  try { const r = await api('/api/newmodel', {name: $('n-name').value.trim(), title: $('n-title').value.trim(), add_to_uses: $('n-uses').checked});
+    $('dlg-new').close(); await loadOverview(); pickModel(r.created); goTab('models');
+  } catch (e) { alert(e.message); }
+}
+
+// ---------- 遊戲整合 ----------
+async function runGame() {
+  const dry = $('g-dry').checked;
+  if (!dry && !confirm('要真的呼叫 Claude 做遊戲嗎？AI 會在新分支 auto/<時間> 上修改你的遊戲程式。每一輪約呼叫 3 次，會消耗訂閱用量。')) return;
+  await cmd({cmd: 'run', rounds: $('g-rounds').value, dry});
+}
+async function buildGameEditor() {
+  let shots = null; try { shots = (await api('/api/config')).shots_spec; } catch (e) {}
+  const files = [{label: 'prompt.md 設計文件', path: 'prompt.md'}, {label: 'TASK.md 本輪任務', path: 'TASK.md'},
+    {label: 'human-feedback.md 你的意見', path: 'human-feedback.md'}, {label: 'visual-checklist.md 驗收清單', path: 'checks/visual-checklist.md'}];
+  if (shots) files.push({label: 'shots.json 截圖清單', path: shots});
+  files.forEach(f => f.onSave = loadOverview);
+  $('g-editor').setAttribute('data-ed', ''); editor($('g-editor'), files);
+}
+
+// ---------- 背景工作 ----------
+let jobSeen = 0, jobWasRunning = false;
+async function cmd(body) {
+  try { await api('/api/cmd', body); jobSeen = 0; $('c-log').textContent = ''; $('console').classList.add('open'); pollJob(); }
+  catch (e) { alert(e.message); }
+}
+async function stopJob() { if (confirm('確定停止目前的工作？這一輪做到一半的結果會留在紀錄裡。\n\n如果停的是「做遊戲」：遊戲資料夾會暫時停在 AI 的分支 auto/<時間>，下次按「開始做遊戲」時會自動切回你原本的分支。')) { await api('/api/job/stop', {}); pollJob(); } }
+async function pollJob() {
+  try {
+    const j = await api('/api/job?since=' + jobSeen);
+    if (j.lines.length) { const pre = $('c-log'); const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+      pre.textContent += j.lines.join('\n') + '\n'; jobSeen = j.total; if (atEnd) pre.scrollTop = pre.scrollHeight; }
+    $('c-state').innerHTML = j.running ? `<span class="warn">執行中：${esc(j.cmd)}</span>（${esc(j.started)} 開始）` :
+      (j.cmd ? `上一個工作：${esc(j.cmd)}，${j.rc === 0 ? '<span class="ok">結束</span>' : '<span class="bad">結束（回傳碼 ' + j.rc + '）</span>'}` : '沒有工作在跑');
+    $('c-stop').style.display = j.running ? '' : 'none';
+    if (jobWasRunning && !j.running) { loadOverview(); if ($('runs').classList.contains('on')) loadRuns(); }
+    jobWasRunning = j.running;
+  } catch (e) { $('c-state').textContent = '連不到介面伺服器（是不是關掉了？）'; }
+}
+setInterval(pollJob, 1500);
+
+// ---------- 執行紀錄 ----------
+async function loadRuns() {
+  const runs = await api('/api/runs');
+  const kind = {model: '模型', game: '遊戲', gates: '只跑關卡'};
+  $('r-list').innerHTML = runs.length ? runs.map(r => `<button class="b ${r.id === CUR_RUN ? 'on' : ''}" onclick="openRun('${esc(r.id)}')">
+    <span class="tag">${kind[r.kind]}</span> ${esc(r.id)}<br><span class="muted">${esc(r.state || '')}${r.dry_run ? '・乾跑' : ''}${r.rounds ? '・' + r.rounds + ' 輪' : ''}</span></button>`).join('')
+    : '<p class="muted">還沒有任何紀錄。</p>';
+}
+async function openRun(id) {
+  CUR_RUN = id; goTab('runs');
+  let r; try { r = await api('/api/run?id=' + encodeURIComponent(id)); } catch (e) { $('r-detail').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+  const f = r.files, base = id + '/';
+  let h = `<h2>${esc(id)}</h2>`;
+  if (f.includes('REPORT.md')) h += `<div class="card md">${md(await (await fetch(wsUrl(base + 'REPORT.md'))).text())}</div>`;
+  const msgs = f.filter(x => x.startsWith('messages/'));
+  if (msgs.length) h += `<div class="card"><h2>每一輪的訊息</h2><div class="tabs">${msgs.map(m => `<button class="b" onclick="showMsg(this,'${esc(base + m)}')">${esc(m.replace('messages/', ''))}</button>`).join('')}</div><div id="r-msg" class="md"></div></div>`;
+  const dirs = [...new Set(f.filter(x => x.endsWith('.png')).map(x => x.slice(0, x.lastIndexOf('/'))))];
+  for (const d of dirs.reverse()) {
+    let desc = {};
+    if (f.includes(d + '/gate-result.json')) { try { const g = await (await fetch(wsUrl(base + d + '/gate-result.json'))).json();
+      (g.shots || []).forEach(s => desc[s.file] = s.describe);
+      if ((g.errors || []).length) h += `<div class="notice bad">${esc(d)} 關卡錯誤：<br>${g.errors.map(esc).join('<br>')}</div>`;
+      if ((g.failed_checks || []).length) h += `<div class="notice bad">${esc(d)} 沒過的檢查：<br>${g.failed_checks.map(esc).join('<br>')}</div>`;
+    } catch (e) {} }
+    h += `<div class="card"><h2>截圖：${esc(d)}</h2><div class="shots">` + f.filter(x => x.startsWith(d + '/') && x.endsWith('.png')).map(x => {
+      const n = x.split('/').pop();
+      return `<figure><img src="${wsUrl(base + x)}" alt="${esc(n)}" onclick="zoom(this.src)"><figcaption><b>${esc(n)}</b><br><span class="muted">${esc(desc[n] || '')}</span></figcaption></figure>`;
+    }).join('') + '</div></div>';
+  }
+  if (h === `<h2>${esc(id)}</h2>`) h += '<p class="muted">這筆紀錄沒有報告或截圖（可能中途被停止）。</p>';
+  $('r-detail').innerHTML = h;
+  loadRuns();
+}
+async function showMsg(btn, rel) {
+  btn.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+  $('r-msg').innerHTML = md(await (await fetch(wsUrl(rel))).text());
+}
+function zoom(src) { $('zoom-img').src = src; $('zoom').showModal(); }
+
+// ---------- 設定 ----------
+// 每個欄位：[設定路徑, 標籤, 型別, 說明]；型別 text / num / bool / model / list
+const SLOTS = [['model_dev', '模型開發者'], ['model_visual', '模型視覺審查者'], ['model_code', '模型程式審查者'],
+  ['game_dev', '遊戲開發者'], ['game_visual', '遊戲視覺審查者'], ['game_code', '遊戲程式審查者']];
+const FIELDS = [
+  ['#', 'AI 模型（留空＝沿用上一層：角色 → 全部 → Claude Code 預設）'],
+  ['model', '全部角色（預設）', 'model', '角色沒有單獨設定時用這個'],
+  ...SLOTS.map(([k, l]) => ['models.' + k, l, 'model']),
+  ['max_budget_usd_per_call', '單次呼叫花費上限（美元）', 'num', '留空＝不限制'],
+  ['#', '輪數與停止條件'],
+  ['model_max_rounds', '模型最多幾輪', 'num'], ['max_rounds', '遊戲最多幾輪', 'num'],
+  ['stall_rounds', '連續幾輪回饋相同就判定卡住', 'num'], ['agent_timeout_sec', '每次 AI 呼叫的逾時（秒）', 'num'],
+  ['#', '審查者'],
+  ['model_reviewers.visual', '模型：視覺審查', 'bool'], ['model_reviewers.code', '模型：程式審查', 'bool'],
+  ['reviewers.visual', '遊戲：視覺審查', 'bool'], ['reviewers.code', '遊戲：程式審查', 'bool'],
+  ['#', '遊戲專案'],
+  ['project_dir', '遊戲資料夾', 'text', '相對於 game-dev-flow 的路徑，例如 games/my-game'],
+  ['build_cmd', '建置指令', 'text', '在遊戲資料夾裡執行，把程式打包成一個 HTML'],
+  ['entry', '建置產物', 'text', '建置完成後要打開的 HTML（相對於遊戲資料夾）'],
+  ['shots_spec', '截圖清單', 'text', '相對於 game-dev-flow 的路徑'],
+  ['uses_models', '遊戲用到的模型', 'uses', '勾選的模型都要先發布，遊戲才能開工'],
+  ['extra_checks', '自訂檢查指令', 'list', '一行一個指令，在遊戲資料夾執行，回傳 0 才算通過'],
+  ['#', '瀏覽器與效能'],
+  ['require_webgpu', '強制 WebGPU', 'bool', '遊戲沒用 WebGPU 就判不通過'],
+  ['headed', '開出真的瀏覽器視窗', 'bool', '一般不用開；無頭模式已經會用到顯示卡'],
+  ['viewport', '遊戲截圖尺寸', 'text', '例如 1100x700'], ['model_viewport', '模型截圖尺寸', 'text'],
+  ['perf.target_avg_ms', '平均幀時間目標（毫秒）', 'num', '留空＝不檢查；16.7＝60 fps'], ['perf.target_p95_ms', 'p95 幀時間目標（毫秒）', 'num'],
+];
+let CFG = null;
+const getp = (o, p) => p.split('.').reduce((a, k) => a == null ? undefined : a[k], o);
+const setp = (o, p, v) => { const ks = p.split('.'); let a = o; ks.slice(0, -1).forEach(k => { if (typeof a[k] !== 'object' || a[k] === null) a[k] = {}; a = a[k]; }); a[ks.at(-1)] = v; };
+async function loadSettings() {
+  CFG = await api('/api/config');
+  if (!OV) await loadOverview();
+  let h = `<datalist id="dl-models">${CLAUDE_MODELS.map(m => `<option value="${m}">`).join('')}</datalist>`;
+  FIELDS.forEach(([p, label, type, note], i) => {
+    if (p === '#') { h += `<div class="h">${esc(label)}</div>`; return; }
+    const v = getp(CFG, p), id = 'f' + i;
+    h += `<label for="${id}">${esc(label)}</label>`;
+    if (type === 'bool') h += `<label><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> 開啟</label>`;
+    else if (type === 'num') h += `<input type="number" step="any" id="${id}" value="${v ?? ''}" style="width:140px">`;
+    else if (type === 'model') h += `<input type="text" id="${id}" list="dl-models" value="${esc(v ?? '')}" placeholder="沿用上一層" style="width:260px">`;
+    else if (type === 'list') h += `<textarea id="${id}" rows="3" style="width:100%">${esc((v || []).join('\n'))}</textarea>`;
+    else if (type === 'uses') h += `<div id="${id}">${OV.models.map(m => `<label style="margin-right:12px"><input type="checkbox" value="${esc(m.name)}" ${(v || []).includes(m.name) ? 'checked' : ''}> ${esc(m.name)}</label>`).join('')}</div>`;
+    else h += `<input type="text" id="${id}" value="${esc(v ?? '')}" style="width:100%">`;
+    if (note) h += `<div class="note">${esc(note)}</div>`;
+  });
+  $('s-form').innerHTML = h;
+}
+async function saveSettings() {
+  const c = JSON.parse(JSON.stringify(CFG));
+  for (const [i, [p, label, type]] of FIELDS.entries()) {
+    if (p === '#') continue;
+    const el = $('f' + i);
+    let v;
+    if (type === 'bool') v = el.checked;
+    else if (type === 'num') { if (el.value === '') v = null; else { v = Number(el.value); if (!isFinite(v)) return flash($('s-msg'), label + ' 不是數字', 'bad'); } }
+    else if (type === 'model') v = el.value.trim() || null;
+    else if (type === 'list') v = el.value.split('\n').map(s => s.trim()).filter(Boolean);
+    else if (type === 'uses') v = [...el.querySelectorAll('input:checked')].map(x => x.value);
+    else v = el.value.trim();
+    if (['model_max_rounds', 'max_rounds', 'stall_rounds', 'agent_timeout_sec'].includes(p) && (v === null || v < 1)) return flash($('s-msg'), label + ' 至少要 1', 'bad');
+    setp(c, p, v);
+  }
+  try { await api('/api/config', {config: c}); CFG = c; flash($('s-msg'), '已儲存'); loadOverview(); buildGameEditor(); }
+  catch (e) { flash($('s-msg'), e.message, 'bad'); }
+}
+
+// ---------- 進階 ----------
+async function buildAdvanced() {
+  const l = await api('/api/lists');
+  const files = [...l.agents.map(n => ({label: 'agents/' + n, path: 'agents/' + n})),
+    ...l.checks.filter(n => n !== 'visual-checklist.md').map(n => ({label: 'checks/' + n, path: 'checks/' + n})),
+    {label: 'flow.config.json（原始檔）', path: 'flow.config.json'}];
+  $('a-editor').setAttribute('data-ed', ''); editor($('a-editor'), files);
+}
+
+async function refreshAll() {
+  const ed = $('m-editor');
+  if (ed && ed._dirty && ed._dirty() && !confirm('模型的檔案還沒存，重新整理會丟掉修改，確定？')) return;
+  await loadOverview(); if (CUR_MODEL) pickModel(CUR_MODEL); pollJob();
+}
+loadOverview().then(() => { buildGameEditor(); buildAdvanced(); });
+pollJob();
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "project_dir": "game",
+  "build_cmd": "npm run build",
+  "entry": "dist/index.html",
+  "shots_spec": "game/shots.json",
+  "max_rounds": 5,
+  "stall_rounds": 2,
+  "agent_timeout_sec": 1800,
+  "max_diff_chars": 60000,
+  "claude_bin": "claude",
+  "model": null,
+  "models": {
+    "model_dev": null,
+    "model_visual": null,
+    "model_code": null,
+    "game_dev": null,
+    "game_visual": null,
+    "game_code": null
+  },
+  "max_budget_usd_per_call": null,
+  "viewport": "1100x700",
+  "browser_args": "",
+  "headed": false,
+  "require_webgpu": true,
+  "perf": {
+    "target_avg_ms": null,
+    "target_p95_ms": null
+  },
+  "extra_checks": [],
+  "reviewers": {
+    "visual": true,
+    "code": true
+  },
+  "dev_allowed_tools": [
+    "Read",
+    "Edit",
+    "Write",
+    "Glob",
+    "Grep",
+    "Bash(npm *)",
+    "Bash(node *)",
+    "Bash(git status*)",
+    "Bash(git diff*)"
+  ],
+  "notify_cmd": null,
+  "models_dir": "models",
+  "uses_models": [],
+  "model_max_rounds": 5,
+  "model_viewport": "900x700",
+  "model_reviewers": {
+    "visual": true,
+    "code": false
+  }
+}

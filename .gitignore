@@ -1,0 +1,9 @@
+workspace/
+__pycache__/
+node_modules/
+dist/
+.DS_Store
+.venv/
+.claude-tmp/
+game/
+models/

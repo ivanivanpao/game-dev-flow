@@ -1,0 +1,6 @@
+{
+  "name": "game-dev-flow",
+  "private": true,
+  "description": "遊戲開發流程：模型工坊（lab）需要 three 與 esbuild",
+  "dependencies": { "esbuild": "^0.28.2", "three": "^0.187.0" }
+}
