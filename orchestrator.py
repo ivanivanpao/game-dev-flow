@@ -28,10 +28,13 @@ PROJECT = (ROOT / CFG['project_dir']).resolve()
 MODELS = (ROOT / CFG.get('models_dir', 'models')).resolve()
 RELEASED = MODELS / '_released'
 RELEASED.mkdir(parents=True, exist_ok=True)     # models/ 不進版控，重新下載專案時資料夾不存在；先建好，後面的指令才不會當掉
-VERDICT_RE = re.compile(r'VERDICT:\s*(APPROVED|CHANGES_REQUESTED)')
-MODEL_TAG_RE = re.compile(r'\[模型[:：]\s*([\w\-]+)\s*\]')
-DEFECT_SECTIONS = ('缺陷清單', '問題清單')            # 審查者列缺陷的段落標題（視覺審查者／程式審查者）
-SERIOUS_RE = re.compile(r'\[\s*(高|中)\s*\]')          # 嚴重度「高」或「中」
+REVIEW_JSON_RE = re.compile(r'```json[ \t]*\r?\n(.*?)```', re.S)   # 審查者輸出最後面那段 ```json … ``` 區塊
+VERDICTS = ('APPROVED', 'CHANGES_REQUESTED')           # 審查者能給的結論
+BAD_REVIEW = ('NO_VERDICT', 'BAD_FORMAT')              # 協調器判定的「審查者輸出不合格」：一律當沒通過
+SEVERITIES = ('高', '中', '低')
+SERIOUS = ('高', '中')                                  # 這兩種嚴重度會擋下通過、也會讓模型被退件
+MODEL_NAME_RE = re.compile(r'^[\w\-]+$')               # 模型名稱（資料夾名稱）
+RETRY_MARK = '【協調器：你上一次的輸出格式不對】'      # 審查者格式錯誤時重叫一次，提示詞會加上這段
 SKIP_DIRS = {'.git', 'node_modules', '.venv', 'workspace', '.claude-tmp', '__pycache__', 'dist'}   # 掃描檔案時略過的資料夾
 SRC_EXT = {'.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.html', '.vue'}                          # 遊戲裡要檢查引用路徑的檔案類型
 # 抓出 import … from '路徑'、export … from '路徑'、import('路徑')、require('路徑')、HTML 的 src="路徑" 裡的路徑（可以跨行）
@@ -152,19 +155,34 @@ def agent_model(slot):
     return (CFG.get('models') or {}).get(slot) or CFG.get('model')
 
 
-def run_agent(role, prompt, cwd, tools, allowed, timeout, dry, slot):
+def guard_settings():
+    """產生給 --settings 用的暫存設定檔：開發者每次要用改檔工具之前，先執行 gates/guard.py 檢查能不能改。
+    規則不寫在這裡，由 run_agent 放進環境變數 FLOW_GUARD_RULES，所以每個角色都能共用同一種設定。
+    路徑一律用正斜線；有空白才加引號（hook 指令會經過殼層 (shell)，引號越少越不容易出錯）"""
+    q = lambda p: f'"{Path(p).as_posix()}"' if ' ' in str(p) else Path(p).as_posix()
+    settings = {'hooks': {'PreToolUse': [{
+        'matcher': 'Edit|Write|MultiEdit|NotebookEdit',                       # 會改檔的工具
+        'hooks': [{'type': 'command', 'command': f"{q(sys.executable)} {q(ROOT / 'gates' / 'guard.py')}"}]}]}}
+    fd, path = tempfile.mkstemp(prefix='flow-guard-', suffix='.json')
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, ensure_ascii=False)
+    return Path(path)
+
+
+def run_agent(role, prompt, cwd, tools, allowed, timeout, dry, slot, guard=None):
     """
     role    : dev / visual / code
     prompt  : 完整提示詞（用 stdin 傳入，避免命令列長度限制）
     tools   : --tools 的值，限制這個 agent 能用的工具集合
     allowed : --allowedTools 的清單，這些工具不需要詢問就能用
     slot    : 角色代號（model_dev / model_visual / model_code / game_dev / game_visual / game_code），用來查要用哪個模型
+    guard   : 開發者用。改檔規則 {allow_files, allow_dirs, deny_files, hint}，有給就掛上改檔守門員（gates/guard.py），
+              不准改的檔案在改之前就擋下。它擋不到 Bash 寫檔，所以呼叫端仍要用 Protect 做事後還原
     """
     log(f'  {slot} 使用模型：' + (agent_model(slot) or 'Claude Code 預設'))
     if dry:
-        return {'dev': '## 這一輪做了什麼\n- （dry-run：沒有真的呼叫 AI）\n',
-                'visual': '（dry-run）\nVERDICT: APPROVED\n',
-                'code': '（dry-run）\nVERDICT: APPROVED\n'}[role]
+        ok_review = '（dry-run）\n```json\n{"verdict": "APPROVED", "defects": []}\n```\n'
+        return {'dev': '## 這一輪做了什麼\n- （dry-run：沒有真的呼叫 AI）\n', 'visual': ok_review, 'code': ok_review}[role]
     exe = shutil.which(CFG['claude_bin'])
     if not exe:
         sys.exit(f"找不到指令 {CFG['claude_bin']}。請先安裝 Claude Code，或在 flow.config.json 的 claude_bin 填完整路徑。")
@@ -176,36 +194,127 @@ def run_agent(role, prompt, cwd, tools, allowed, timeout, dry, slot):
         cmd += ['--model', agent_model(slot)]
     if CFG.get('max_budget_usd_per_call'):
         cmd += ['--max-budget-usd', str(CFG['max_budget_usd_per_call'])]        # 單次呼叫的花費上限
+    env, settings = None, None
+    if guard:
+        settings = guard_settings()
+        cmd += ['--settings', str(settings)]                                    # 載入額外設定：掛上改檔守門員
+        env = dict(os.environ, FLOW_GUARD_RULES=json.dumps(                     # 守門員從這個環境變數讀規則
+            {k: [str(p) for p in guard.get(k, [])] for k in ('allow_files', 'allow_dirs', 'deny_files')} | {'hint': guard.get('hint', '')}))
     try:
         r = subprocess.run(cmd, input=prompt, cwd=cwd, capture_output=True, text=True, encoding='utf-8',
-                           errors='replace', timeout=timeout)
+                           errors='replace', timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return f'（{role} 逾時 {timeout} 秒，沒有輸出）\n'
+    finally:
+        if settings:
+            settings.unlink(missing_ok=True)
     if r.returncode != 0:
         return f'（{role} 執行失敗，回傳碼 {r.returncode}）\n{tail(r.stderr or r.stdout)}\n'
     return r.stdout
 
 
+def agent_failed(role, out):
+    """run_agent 回傳的是不是「逾時／執行失敗」的訊息（不是 agent 真的輸出）"""
+    return out.startswith(f'（{role} 逾時') or out.startswith(f'（{role} 執行失敗')
+
+
+# ---------- 審查結果（固定格式的 JSON）----------
+def defect_line(d):
+    """把一筆缺陷轉成一行字，給開發者、報告與 reopen.md 看"""
+    tag = {'模型': f"[模型:{d.get('model')}]", '遊戲': '[遊戲]'}.get(d.get('target'), '')   # 模型工坊的審查者不分遊戲／模型，沒有標籤
+    where = d.get('where', '').strip()
+    return f"[{d['severity']}]{tag} {where}：{d['problem']}" if where else f"[{d['severity']}]{tag} {d['problem']}"
+
+
+def parse_review(text):
+    """解析審查者輸出最後面那段 ```json 區塊，並檢查格式。回傳：
+      verdict：APPROVED／CHANGES_REQUESTED，或協調器判定的 NO_VERDICT（找不到 JSON）／BAD_FORMAT（格式不對）
+      defects：缺陷清單（每筆有 severity、target、model、where、problem）
+      error  ：格式錯在哪（沒錯就是空字串）
+      note   ：協調器改判的說明（審查者判 APPROVED 卻列了高／中缺陷時）
+      body   ：去掉 JSON 區塊後的文字（逐條對照、最不確定的事…）
+    格式不對一律當沒通過（拿不準就不放行）。"""
+    text = text or ''
+    blocks = list(REVIEW_JSON_RE.finditer(text))
+    if not blocks:
+        return {'verdict': 'NO_VERDICT', 'defects': [], 'error': '找不到 ```json 區塊', 'note': '', 'body': text}
+    m = blocks[-1]
+    body = (text[:m.start()] + text[m.end():]).strip()
+    bad = lambda e: {'verdict': 'BAD_FORMAT', 'defects': [], 'error': e, 'note': '', 'body': body}
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        return bad(f'JSON 解析失敗：{e}')
+    if not isinstance(data, dict):
+        return bad('JSON 最外層要是物件 {…}')
+    errs = []
+    if data.get('verdict') not in VERDICTS:
+        errs.append(f"verdict 只能是 {' 或 '.join(VERDICTS)}，收到 {data.get('verdict')!r}")
+    defects = data.get('defects')
+    if not isinstance(defects, list):
+        errs.append('defects 要是陣列 […]（沒有缺陷就寫 []）')
+        defects = []
+    clean = []
+    for i, d in enumerate(defects, 1):
+        if not isinstance(d, dict):
+            errs.append(f'defects 第 {i} 筆要是物件 {{…}}'); continue
+        if d.get('severity') not in SEVERITIES:
+            errs.append(f"defects 第 {i} 筆的 severity 只能是 高／中／低，收到 {d.get('severity')!r}")
+        if d.get('target') not in (None, '遊戲', '模型'):            # 沒寫 target 不算錯（模型工坊用不到），但不會退件模型
+            errs.append(f"defects 第 {i} 筆的 target 只能是 遊戲 或 模型，收到 {d.get('target')!r}")
+        if d.get('target') == '模型' and not (isinstance(d.get('model'), str) and MODEL_NAME_RE.match(d['model'])):
+            errs.append(f"defects 第 {i} 筆是模型的問題，model 要寫模型名稱，收到 {d.get('model')!r}")
+        if not isinstance(d.get('where', ''), str):
+            errs.append(f'defects 第 {i} 筆的 where 要是文字')
+        if not (isinstance(d.get('problem'), str) and d['problem'].strip()):
+            errs.append(f'defects 第 {i} 筆的 problem 不能是空的')
+        clean.append(d)
+    if errs:
+        return bad('；'.join(errs))
+    v, note = data['verdict'], ''
+    if v == 'APPROVED' and any(d['severity'] in SERIOUS for d in clean):   # 結論和缺陷互相矛盾：照比較嚴的算
+        v, note = 'CHANGES_REQUESTED', '審查者判 APPROVED 卻列了高／中缺陷，協調器改判 CHANGES_REQUESTED'
+    return {'verdict': v, 'defects': clean, 'error': '', 'note': note, 'body': body}
+
+
 def verdict(text):
-    m = VERDICT_RE.findall(text or '')
-    return m[-1] if m else 'NO_VERDICT'          # 沒有明確標記就當作沒通過（fail closed）
+    return parse_review(text)['verdict']
 
 
 def model_defects(text):
     """從審查意見挑出「要退回模型工坊」的缺陷，回傳 {模型名稱: [缺陷那一行, …]}。
-    只看「缺陷清單／問題清單」那一段，而且只算嚴重度標「高」或「中」的項目。
-    其他段落（逐條對照、最不確定的事）或標「低」的項目就算寫了 [模型:…] 也不算，
-    避免審查者隨口提一句就把已發布的模型撤回。"""
-    found, in_list = {}, False
-    for line in (text or '').splitlines():
-        s = line.strip()
-        if s.startswith('#'):                                    # 遇到新的標題：判斷是不是缺陷清單那一段
-            in_list = any(k in s for k in DEFECT_SECTIONS)
-            continue
-        if in_list and SERIOUS_RE.search(s):
-            for m in MODEL_TAG_RE.findall(s):
-                found.setdefault(m, []).append(s)
+    只算 JSON 裡 target 是「模型」、而且嚴重度是「高」或「中」的缺陷。
+    文字段落（逐條對照、最不確定的事）提到模型不算，「低」也不算，避免審查者隨口提一句就把已發布的模型撤回。
+    格式不對的輸出一筆都不算（那一輪本來就判沒通過）。"""
+    found = {}
+    for d in parse_review(text)['defects']:
+        if d.get('target') == '模型' and d['severity'] in SERIOUS:
+            found.setdefault(d['model'], []).append(defect_line(d))
     return found
+
+
+def review_text(out):
+    """給開發者看的審查意見：JSON 區塊換成固定格式的缺陷清單，讀起來跟以前一樣"""
+    r = parse_review(out)
+    if r['verdict'] in BAD_REVIEW:
+        return f"{out.strip()}\n\n（協調器：審查者的輸出格式不對，這一輪視為沒通過。原因：{r['error']}）"
+    L = [r['body'], '', '## 缺陷清單'] + ([f'{i}. {defect_line(d)}' for i, d in enumerate(r['defects'], 1)] or ['（無）'])
+    if r['note']:
+        L += ['', f"（協調器：{r['note']}）"]
+    return '\n'.join(L + ['', f"VERDICT: {r['verdict']}"])
+
+
+def review_agent(role, prompt, cwd, tools, allowed, dry, slot):
+    """呼叫審查者。輸出格式不對（不是逾時或執行失敗）就再叫一次，並告訴它錯在哪；第二次還是不對就照樣回傳（判沒通過）。
+    重叫比整輪重來便宜：開發者這一輪的修改不會因為審查者寫錯格式而白費"""
+    out = run_agent(role, prompt, cwd, tools, allowed, CFG['agent_timeout_sec'], dry, slot)
+    r = parse_review(out)
+    if r['verdict'] not in BAD_REVIEW or agent_failed(role, out):
+        return out
+    log(f"  審查者輸出格式不對（{r['error']}），重叫一次…")
+    retry = (prompt + f"\n\n---\n{RETRY_MARK}\n錯在：{r['error']}\n"
+             '請重新完整做一次審查，並且最後一定要照「輸出格式」附上那段 ```json 區塊。')
+    return run_agent(role, retry, cwd, tools, allowed, CFG['agent_timeout_sec'], dry, slot)
 
 
 def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot):
@@ -226,7 +335,7 @@ def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot):
                   '\n請用 Read 工具逐一開啟每一個檔案（圖片與文字都要看），然後依格式輸出。')
         # 讀檔權限只開放「自己的隔離資料夾」：Read(./**) 只涵蓋工作資料夾，資料夾外的讀取在 dontAsk 模式下會被拒絕
         # （只寫 Read 等於允許讀電腦上任何檔案，審查者就有機會讀到專案程式碼）
-        return run_agent('visual', prompt, sandbox, 'Read', ['Read(./**)'], CFG['agent_timeout_sec'], dry, slot)
+        return review_agent('visual', prompt, sandbox, 'Read', ['Read(./**)'], dry, slot)
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
 
@@ -238,7 +347,7 @@ def code_review(diff, task_text, cwd, dry, slot):
         cut = f'\n（注意：diff 太長，以上只顯示前 {limit} 字，後面省略了 {len(diff) - limit} 字。需要的話請用 Read 工具開啟完整檔案。）\n'
     prompt = (read(ROOT / 'agents' / 'reviewer-code.md') + '\n\n---\n# 本次任務與完成標準\n' + task_text +
               '\n\n# 本輪程式碼差異（diff）\n```diff\n' + diff[:limit] + '\n```\n' + cut)
-    return run_agent('code', prompt, cwd, 'Read,Grep,Glob', ['Read', 'Grep', 'Glob'], CFG['agent_timeout_sec'], dry, slot)
+    return review_agent('code', prompt, cwd, 'Read,Grep,Glob', ['Read', 'Grep', 'Glob'], dry, slot)
 
 
 # =====================================================================
@@ -314,7 +423,8 @@ def cmd_model(args):
         # 開發者上工前才記下要保護的檔案（除了這個模型的 model.js，整個工具資料夾都不准動）；
         # 每一輪重新記，你在兩輪之間改的規格、清單、意見才不會被誤還原
         protected = Protect(lambda: walk_files(ROOT, exclude=[mj]))
-        dev_out = run_agent('dev', prompt, d, 'default', ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash(node *)'], CFG['agent_timeout_sec'], dry, 'model_dev')
+        guard = {'allow_files': [mj], 'hint': f'只能改 models/{name}/model.js。'}     # 改其他檔案在改之前就擋下
+        dev_out = run_agent('dev', prompt, d, 'default', ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash(node *)'], CFG['agent_timeout_sec'], dry, 'model_dev', guard)
         reverted, added = protected.restore()
         (ws / 'messages' / f'r{rnd:02d}-dev.md').write_text(dev_out, 'utf-8')
         after = read(mj)
@@ -362,9 +472,9 @@ def cmd_model(args):
         if g['stats']:
             fb.append(f"- 實測：尺寸 {g['stats']['size']}、包圍盒 {g['stats']['bbox_min']} ~ {g['stats']['bbox_max']}、三角形 {g['stats']['triangles']}")
         if vis_out:
-            fb += ['', '## 視覺審查者意見', vis_out]
+            fb += ['', '## 視覺審查者意見', review_text(vis_out)]
         if code_out:
-            fb += ['', '## 程式審查者意見', code_out]
+            fb += ['', '## 程式審查者意見', review_text(code_out)]
         feedback = '\n'.join(fb)
         (ws / 'messages' / f'r{rnd:02d}-feedback.md').write_text(feedback, 'utf-8')
 
@@ -691,7 +801,9 @@ def cmd_run(args):
                           f"\n\n---\n# 專案建置指令\n{CFG['build_cmd']}\n\n---\n# 上一輪回饋\n" + (feedback or '（第 1 輪，沒有回饋）') +
                           '\n\n---\n# 人類意見\n' + human + f'\n\n現在是第 {rnd} 輪（最多 {rounds} 輪）。')
             protected = Protect(protect_list)          # 開發者上工前才記下，你在兩輪之間改的檔案不會被誤還原
-            dev_out = run_agent('dev', dev_prompt, PROJECT, 'default', CFG['dev_allowed_tools'], CFG['agent_timeout_sec'], dry, 'game_dev')
+            guard = {'allow_dirs': [PROJECT], 'deny_files': [shots],          # 改遊戲資料夾以外、或鏡頭清單，在改之前就擋下
+                     'hint': f"只能改遊戲資料夾（{CFG['project_dir']}）裡的程式；鏡頭清單 {CFG['shots_spec']} 是驗收標準，不能改。"}
+            dev_out = run_agent('dev', dev_prompt, PROJECT, 'default', CFG['dev_allowed_tools'], CFG['agent_timeout_sec'], dry, 'game_dev', guard)
             reverted, added = protected.restore()
             (ws / 'messages' / f'r{rnd:02d}-dev.md').write_text(dev_out, 'utf-8')
             git_ok('add', '-A'); git_ok('commit', '-m', f'round {rnd}', '--allow-empty')
@@ -764,9 +876,9 @@ def cmd_run(args):
                 for x in gx:
                     fb.append(f"- 自訂檢查 `{x['cmd']}`：{'通過' if x['rc'] == 0 else '失敗'}" + ('' if x['rc'] == 0 else '\n```\n' + tail(x['output'], 1200) + '\n```'))
             if vis_out:
-                fb += ['', '## 視覺審查者意見（標 [模型:…] 的是模型本身的問題，不用你修；其中嚴重度高、中的已退回模型工坊）', vis_out]
+                fb += ['', '## 視覺審查者意見（標 [模型:…] 的是模型本身的問題，不用你修；其中嚴重度高、中的已退回模型工坊）', review_text(vis_out)]
             if code_out:
-                fb += ['', '## 程式審查者意見', code_out]
+                fb += ['', '## 程式審查者意見', review_text(code_out)]
             feedback = '\n'.join(fb)
             (ws / 'messages' / f'r{rnd:02d}-feedback.md').write_text(feedback, 'utf-8')
 

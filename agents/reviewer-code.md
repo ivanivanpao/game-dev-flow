@@ -14,18 +14,26 @@
 嚴重度用「高／中／低」三個字。不可以只說「程式看起來沒問題」；找不到問題就列出你最擔心的 3 處。
 
 ## 輸出格式
-```
-## 問題清單
-1. [高] 檔案:行號 — 問題；為什麼；建議怎麼改
-2. ……
-
+先用文字寫「我最擔心的 3 處」，**最後附一段 ```json 區塊**，所有問題都寫在這段 JSON 裡（文字段落不用再列一次）：
+~~~
 ## 我最擔心的 3 處
 - ……
 
-VERDICT: APPROVED
+```json
+{
+  "verdict": "CHANGES_REQUESTED",
+  "defects": [
+    {"severity": "高", "where": "src/main.js:42", "problem": "每幀都 new Vector3；會一直配置記憶體；建議移到迴圈外重複使用"}
+  ]
+}
 ```
-最後一行只能是：
-- `VERDICT: APPROVED`：沒有「高」或「中」的問題。
-- `VERDICT: CHANGES_REQUESTED`：其他情況。
-
-拿不準時選 CHANGES_REQUESTED。
+~~~
+JSON 的規則（協調器用程式讀這段，格式不對就當沒通過）：
+- `verdict` 只能是（拿不準時選 `"CHANGES_REQUESTED"`）：
+  - `"APPROVED"`：沒有「高」或「中」的問題。
+  - `"CHANGES_REQUESTED"`：其他情況。
+- `defects` 是陣列，沒有問題就寫 `[]`。每筆問題：
+  - `severity`：只能是 `"高"`、`"中"`、`"低"`
+  - `where`：檔案:行號
+  - `problem`：問題；為什麼；建議怎麼改
+- 只能有這一段 ```json 區塊，而且要放在最後。

@@ -41,7 +41,7 @@
 ╔══ 第一段：做模型（自動重複，直到通過、跑滿輪數、或卡住）════════════
 ║
 ║  ① 【AI】模型開發者：寫或修改 model.js
-║        │   （只能改 model.js；改了其他檔案會被還原）
+║        │   （只能改 model.js；要改其他檔案會當場被擋下，用其他方式改了也會被還原）
 ║        ▼
 ║     這一輪有沒有改任何東西？
 ║        ├─ 沒有 → 不重新檢查，直接沿用上一輪結果（省用量），算一次「沒改動」
@@ -49,7 +49,7 @@
 ║  ② 【工具】客觀檢查：建出檢視器 → 量尺寸、三角形數… → 從幾個固定角度截圖
 ║        ├─ 沒過 → 把錯誤寫成回饋，回到 ①
 ║        ▼ 過了
-║  ③ 【AI】視覺審查者：只看截圖和規格，挑毛病
+║  ③ 【AI】視覺審查者：只看截圖和規格，挑毛病（最後附一段 JSON：結論＋缺陷清單）
 ║        ├─ 有問題 → 把意見寫成回饋，回到 ①
 ║        ▼ 通過
 ╚══════════════════════════════════════════════════════════════════
@@ -64,14 +64,14 @@
   ▼
 【工具】開工前檢查（任何一項不對就不開始）：
   ・遊戲用到的模型都已發布、而且沒被動過
-  ・遊戲資料夾沒有還沒 commit 的修改
+  ・遊戲資料夾沒有還沒 commit 的修改（還沒用 git 的話，自動建立並存成第一個版本）
   ・記下你原本的分支（例如 main），另開新分支 auto/<時間> 給 AI 改
   │
   ▼
 ╔══ 第二段：做遊戲（自動重複，直到通過、跑滿輪數、卡住、或被模型擋住）══
 ║
 ║  ① 【AI】遊戲開發者：修改你的遊戲程式（project_dir 指定的資料夾）
-║        │   （只能改遊戲資料夾；改了驗收標準或工具的檔案會被還原）
+║        │   （只能改遊戲資料夾；要改驗收標準或工具的檔案會當場被擋下，用其他方式改了也會被還原）
 ║        ▼
 ║     這一輪有沒有改任何東西？
 ║        ├─ 沒有 → 不重新檢查，直接沿用上一輪結果，算一次「沒改動」
@@ -100,7 +100,8 @@
 - **協調器**（orchestrator）：決定每一輪誰上場的普通程式（不是 AI）。agent 不會自己醒來，所以需要它叫。
 - **關卡**（gate）：不靠 AI 判斷、結果只有過／不過的檢查。
 - **審查者**：另外開一個全新的 Claude 做單一任務。它不知道開發者怎麼想，所以不會替作品找藉口。
-- **無頭模式**（headless）：不開對話畫面，用 `claude -p` 傳入任務、取得結果。
+- **無頭模式**（headless）：不開對話畫面，用 `claude -p` 傳入任務、取得結果。用的是你 Claude Code 的登入（訂閱），不是 API 金鑰。
+- **hook**：Claude Code 在特定時間點自動執行的程式。這裡用的是 PreToolUse（AI 每次要用工具之前，先問這支程式可不可以）。
 - **發布**（release）：把通過的 model.js 複製到 `_released/`，並記下它的 sha256（檔案內容算出的指紋，內容只要差一個字，指紋就不同）。
 - **隔離**：審查者的工作資料夾建在系統暫存區，只放截圖與清單，看不到程式碼、看不到開發者的自評。
 
@@ -121,6 +122,9 @@
 溝通規則（來自你的原設計）：每個檔案只有一位作者；只新增不修改舊檔（檔名帶輪數）；每輪只讀最新一份回饋。
 
 **驗收標準與工具本身受保護**：AI 開發者每一輪上工前，協調器會記下整個工具資料夾的檔案（驗收清單、規格、設定、任務、關卡程式、AI 指令、已發布的模型…），做完後比對，被改或被刪就還原，並在回饋裡警告；多出來的新檔案只警告、不刪除。AI 開發者能改的只有：做模型時是那個模型的 `model.js`，做遊戲時是遊戲資料夾（但 `shots.json` 鏡頭清單仍然受保護）。否則開發者可以靠改驗收標準或關卡程式來過關。
+保護分兩層：
+1. **改之前就擋下**：協調器呼叫開發者時用 `--settings` 掛一個 PreToolUse hook（`gates/guard.py`）。開發者每次要用 Edit／Write 改檔，Claude Code 會先問守門員；不准改的檔案當場被擋下，原因直接回給開發者，它這一輪就能換做法，不會白做一整輪。守門員自己出錯時也一律擋下。
+2. **做完後比對、還原**（上面說的）：守門員只擋得到 Claude 的改檔工具，擋不到 Bash（例如 `node` 指令直接寫檔），而且 `claude -p` 遇到格式不對的設定檔會默默忽略、`--bare` 模式會跳過 hook，所以這一層一定保留，當最後一道防線。
 注意：AI 開發者工作的那段時間，你自己在介面上改的檔案也會被還原，請等這一輪結束再改。
 
 ---
@@ -129,13 +133,14 @@
 
 | 條件 | 結果 |
 |---|---|
-| 所有關卡過，且審查者都輸出 `VERDICT: APPROVED` | 通過，停 |
+| 所有關卡過，且審查者 JSON 裡的 `verdict` 都是 `APPROVED` | 通過，停 |
 | 跑滿輪數上限（`model_max_rounds` / `max_rounds`） | 停，報告「仍未通過」 |
 | 某一輪開發者什麼都沒改（程式、規格、清單都跟上一輪一樣） | 不重新檢查、不呼叫審查者，直接沿用上一輪結果（省用量） |
 | 連續 `stall_rounds` 輪「什麼都沒改」，或「客觀檢查失敗的項目完全相同」 | 停，報告「卡住」並寫明原因（不比對 AI 評語，因為 AI 每次用字都不同） |
-| 審查者沒有輸出明確的 `VERDICT:` 行 | 一律當沒通過（拿不準就不放行） |
+| 審查者最後沒有附 JSON 區塊，或格式不對（少欄位、嚴重度不是高／中／低…） | 先重叫那位審查者一次並告訴它錯在哪；還是不對就當沒通過（報告顯示 `NO_VERDICT`／`BAD_FORMAT`，拿不準就不放行） |
+| 審查者判 `APPROVED`，卻列了嚴重度「高」或「中」的缺陷 | 照比較嚴的算：協調器改判 `CHANGES_REQUESTED` |
 | 任一 agent 逾時／失敗 | 該輪視為沒通過，回饋寫明原因 |
-| 審查者在「缺陷清單」裡標了 `[模型:名稱]`，且嚴重度是「高」或「中」（遊戲階段） | 停，狀態 `blocked_on_model`，撤回該模型發布。其他段落或「低」的項目不算；名稱不存在的模型不退件，只在報告裡提醒你 |
+| 審查者 JSON 的缺陷裡有 `target` 是「模型」、且嚴重度是「高」或「中」的（遊戲階段） | 停，狀態 `blocked_on_model`，撤回該模型發布。文字段落提到模型、或「低」的項目不算；名稱不存在的模型不退件，只在報告裡提醒你 |
 | 做遊戲時 git 指令失敗 | 停，狀態 `error`，切回你原本的分支 |
 | 模型的最近一次迴圈是 dry-run | 不能發布（除非你明確加 `--allow-dry-run`，只供測試流程） |
 
@@ -157,22 +162,25 @@ game-dev-flow/
 ├── lab/                        ← 模型檢視器（WebGPU；lab.js、lab.template.html、build_lab.mjs）
 ├── gates/
 │   ├── model_gate.py           ← 模型關卡（幾何檢查＋多角度截圖）
-│   └── browser_gate.py         ← 遊戲關卡（抓錯誤／截圖／幀時間）
+│   ├── browser_gate.py         ← 遊戲關卡（抓錯誤／截圖／幀時間）
+│   └── guard.py                ← 改檔守門員（hook）：AI 開發者改不該改的檔案時，在改之前就擋下
 ├── agents/                     ← 各 agent 的指令
 │   ├── model-dev.md、reviewer-model-visual.md      ← 模型工坊用
 │   └── dev.md、reviewer-visual.md、reviewer-code.md ← 遊戲整合用
 ├── checks/
 │   ├── model-checklist.md      ← 所有模型共通的驗收清單
 │   └── visual-checklist.md     ← 遊戲的累積式驗收清單
-├── models/
-│   ├── axe/ pickaxe/ shovel/   ← 範例三個模型，每個都有：
-│   │     model.js              ←   純函式 build(THREE)，唯一會被改的檔
+├── models/                     ← 不進這個工具的版控（.gitignore）；目前還沒有任何模型
+│   ├── <名稱>/                 ← 在介面「新增模型」建立，每個模型一個資料夾：
+│   │     model.js              ←   純函式 build(THREE)，唯一會被 AI 改的檔（第 1 輪由 AI 建立）
 │   │     spec.md               ←   模型規格（人話：長什麼樣、座標約定、不可以什麼）
-│   │     spec.json             ←   客觀檢查條件＋5 個截圖角度
+│   │     spec.json             ←   客觀檢查條件＋截圖角度（範本預設 4 個角度）
 │   │     checklist.md          ←   這個模型專屬的累積清單
+│   │     human-feedback.md     ←   你對這個模型的意見（第一次在介面編輯時才建立）
 │   │     reopen.md             ←   （遊戲階段退件時自動產生）
 │   └── _released/<名稱>/       ← 發布區：model.js、release.json（版本、sha256）、history.jsonl
-├── examples/chop-game/         ← 範例遊戲（只引用 _released 裡的模型）
+├── game/                       ← 你的遊戲專案（flow.config.json 的 project_dir）；不進這個工具的版控，有自己的 git
+│     shots.json                ←   鏡頭清單：每張截圖怎麼擺場景、應該看到什麼（目前是空的，要自己填）
 └── workspace/                  ← 執行時自動產生
     ├── model-<名稱>-<時間>/    ← 模型迴圈：messages/、snapshots/（每輪 model.js 快照）、shots/、REPORT.md
     ├── <時間>/                 ← 遊戲迴圈：messages/、shots/、REPORT.md
@@ -184,13 +192,20 @@ game-dev-flow/
 ## 六、怎麼用
 
 ### 1. 安裝（只做一次）
+在 game-dev-flow 根目錄執行：
 ```
-npm install                          # 在 game-dev-flow 根目錄：安裝 three 與 esbuild（檢視器與遊戲打包都會往上層找到它們）
-pip install -r requirements.txt      # 安裝 Python 版 Playwright（瀏覽器自動化套件）
-playwright install chromium          # 下載 Playwright 專用的 Chromium（會同時下載完整版與無頭精簡版，關卡要用的是完整版）
+npm install                                                # 安裝 three 與 esbuild（檢視器與遊戲打包都會往上層找到它們）
+python -m venv .venv                                       # 建立這個專案專用的 Python 虛擬環境（.venv 資料夾）
+.venv/Scripts/python.exe -m pip install -r requirements.txt   # 把 Python 版 Playwright（瀏覽器自動化套件）裝進 .venv
+.venv/Scripts/python.exe -m playwright install chromium       # 下載 Playwright 專用的 Chromium（會同時下載完整版與無頭精簡版，關卡要用的是完整版）
 ```
 關卡用完整版 Chromium 的新版無頭模式（`channel='chromium'`）加 `--enable-unsafe-webgpu`，不開視窗也能用到真的顯示卡。預設的無頭精簡版只能拿到 SwiftShader 軟體模擬，Three.js 的 WebGPU 繪圖管線會建立失敗、截圖只剩背景色，所以不用它。
+
+**下面所有指令裡的 `python`，都是指 `.venv/Scripts/python.exe`**。關卡程式用執行協調器的那個 Python 啟動，用系統的 Python 會找不到 Playwright。
+
 另外要先裝好 Claude Code，並確認終端機打 `claude --version` 有反應。
+
+**登入與計費**：協調器用 `claude -p` 呼叫 Claude Code，走的是你 Claude Code 的登入（訂閱額度）。注意：電腦裡如果設了環境變數 `ANTHROPIC_API_KEY`，`-p` 模式一定會改用它，變成另外按 API 用量計費。不想這樣就不要設這個變數。
 
 ### 圖形化介面（不想打指令就用這個）
 雙擊根目錄的 `gui.bat`（或執行 `.venv/Scripts/python.exe gui/server.py`），瀏覽器會自動打開 `http://127.0.0.1:8765/`。下面所有指令與要寫的檔案，都能在介面上完成：
@@ -213,12 +228,13 @@ python orchestrator.py status
 列出每個模型：最近一次迴圈結果、有沒有發布、發布的版本、工坊版本是否比發布版新；以及「遊戲現在能不能開工」。
 
 ### 3. 第一段：做一個模型
+先建立模型：在介面「① 模型工坊」按「新增模型」，會產生 `models/<名稱>/` 與 spec.md、spec.json、checklist.md 範本，把 spec.md、spec.json 裡【】的地方填完（總覽頁會提醒哪些還沒填）。以下用 `axe` 當例子。
 ```
 python orchestrator.py model axe --dry-run --rounds 1    # 先乾跑一輪驗證流程
 python orchestrator.py model axe                         # 真的跑
 ```
 - `model axe`：對 `models/axe/` 跑模型迴圈
-- `--dry-run`：AI 的部分用假回覆，關卡是真的跑（不花錢，但**這種通過不能發布**）
+- `--dry-run`：AI 的部分用假回覆，關卡是真的跑（不消耗訂閱額度，但**這種通過不能發布**）
 - `--rounds N`：最多幾輪（不寫用 `model_max_rounds`）
 
 結束後看 `workspace/model-axe-<時間>/REPORT.md`。
@@ -243,6 +259,7 @@ python orchestrator.py run --dry-run --rounds 1
 python orchestrator.py run                 # 做遊戲：AI 反覆修改你的遊戲程式
 ```
 - 模型沒發布完，`run` 會直接擋下並列出缺哪些。
+- 遊戲資料夾還沒用 git 的話，`run` 會自動 `git init`，並把目前的檔案存成第一個版本（分支 `main`）。
 - 遊戲資料夾有還沒 commit 的修改，`run` 也會直接擋下並列出是哪些檔案。請先自己 commit，工具不會替你存。
 - 開始時記下你原本的分支（例如 `main`），另開分支 `auto/<時間>` 給 AI 改，每輪一個 commit。**你原本的分支不會被動到。**
 - 結束時（不管通過、失敗、出錯、或在命令列按 Ctrl+C）會自動切回你原本的分支。AI 的修改留在 `auto/<時間>`。
@@ -250,7 +267,7 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 - 結束後看 `workspace/<時間>/REPORT.md`，切到 `auto/<時間>` 親自玩，滿意才合併。
 
 ### 6. 遊戲階段發現模型有問題
-審查者會在「缺陷清單」裡、嚴重度高或中的缺陷前標 `[模型:axe]`。協調器會：
+審查者最後附的 JSON 裡，每筆缺陷都要標 `target`（`"遊戲"` 或 `"模型"`）。有 `"target": "模型", "model": "axe"`、而且嚴重度高或中的缺陷時，協調器會：
 1. 把缺陷寫進 `models/axe/reopen.md`
 2. 自動撤回 axe 的發布（`release.revoked.*.json`）
 3. 停止遊戲迴圈，報告狀態 `blocked_on_model`
@@ -260,8 +277,30 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 撤回發布用：`python orchestrator.py unrelease axe`。
 
 ### 7. 換成你自己的模型／遊戲
-- 新模型：複製 `models/axe/` 改名，寫 `spec.md`、`spec.json`（客觀檢查條件＋截圖角度）；再把名稱加進 `flow.config.json` 的 `uses_models`（遊戲用到哪些，就要先發布哪些）。
-- 新遊戲：改 `flow.config.json` 的 `project_dir`、`build_cmd`、`entry`、`shots_spec`；鏡頭清單格式照 `examples/chop-game/shots.json`。
+- 新模型：在介面「新增模型」，寫 `spec.md`、`spec.json`（客觀檢查條件＋截圖角度）。遊戲要用的模型，名稱要在 `flow.config.json` 的 `uses_models` 裡（新增時可以勾選順便加入；遊戲用到哪些，就要先發布哪些）。
+- 新遊戲：改 `flow.config.json` 的 `project_dir`、`build_cmd`、`entry`、`shots_spec`（目前是 `game/`、`npm run build`、`dist/index.html`、`game/shots.json`）。
+- 鏡頭清單（`shots.json`）格式：
+  ```json
+  {
+    "ready": "window.__game && window.__game.ready",
+    "settle_ms": 1500,
+    "shots": [
+      { "name": "01-overview", "setup": "window.__game.setCamera([4, 3, 4], [0, 0, 0])", "wait_ms": 800,
+        "describe": "整個場景：樹在左邊、玩家拿著斧頭站在中間" }
+    ],
+    "perf": { "seconds": 8 }
+  }
+  ```
+  | 欄位 | 意思 |
+  |---|---|
+  | `ready` | 一段 JS，結果為真才算遊戲就緒（最多等 `ready_timeout_ms`，預設 60000） |
+  | `settle_ms` | 就緒後再等多久才開始截圖（預設 1500） |
+  | `shots[].name` | 截圖檔名 |
+  | `shots[].setup` | 選填：截圖前在頁面執行的 JS（擺鏡頭、觸發動作、凍結動畫…，用遊戲自己暴露的測試介面；上面的 `setCamera` 只是例子） |
+  | `shots[].wait_ms` | 執行 setup 後等多久再拍（預設 800） |
+  | `shots[].describe` | 這張圖應該看到什麼（給視覺審查者對照） |
+  | `perf` | 選填：量幀時間。`seconds` 量幾秒（預設 8），也可以加 `setup` |
+  | `ignore_console` | 選填：要忽略的 console 訊息（正規表示式清單） |
 - 遊戲裡引用模型的寫法（只能引用 `_released`）：
   ```js
   import { build as buildAxe, meta as axeMeta } from '../../../models/_released/axe/model.js';
@@ -275,7 +314,7 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 .venv/Scripts/python.exe tests/run_tests.py
 ```
 - 會在系統暫存區建一份專案副本，用「假的 claude」（`tests/fake_claude.py`）跑做模型、做遊戲、GUI 的實際流程。**不呼叫真的 Claude、不消耗訂閱額度、不動你真正的專案和遊戲。**
-- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 35 項，通過 35 項，失敗 0 項」。大約一兩分鐘。
+- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 63 項，通過 63 項，失敗 0 項」。大約一兩分鐘。
 - 全部通過會自動刪掉副本；有失敗會保留副本並印出位置，方便查原因。
 - 如果是**故意**改變某個行為（例如改了退件規則），測試也要跟著改，不然會顯示失敗。
 
@@ -303,12 +342,13 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 | 參數 | 意思 |
 |---|---|
 | `-p` | 無頭模式：不開對話畫面，讀完提示詞、做完就輸出並結束。提示詞用標準輸入傳，避免命令列太長 |
-| `--output-format text` | 輸出純文字（協調器要存檔、找 `VERDICT:` 那行） |
+| `--output-format text` | 輸出純文字（協調器存檔後，從審查者輸出最後的 JSON 區塊讀出結論與缺陷） |
+| `--settings <檔案>` | 只有開發者有：載入額外設定，掛上改檔守門員 hook（`gates/guard.py`）。設定檔是每次呼叫前建在系統暫存區、用完就刪；可改哪些檔案由環境變數 `FLOW_GUARD_RULES` 傳給守門員 |
 | `--tools <清單>` | 限制這個 agent「有哪些工具」。視覺審查者只給 `Read`，而且允許清單寫成 `Read(./**)`，只能讀自己的隔離資料夾，讀不到專案程式碼，也改不了東西 |
 | `--allowedTools <清單>` | 這些工具免詢問。無頭模式沒人可以按「允許」，沒列在這裡的會被拒絕 |
 | `--permission-mode` | 開發者 `acceptEdits`（可直接改檔）；審查者 `dontAsk`（沒在允許清單的一律拒絕） |
 | `--model` | 選填：指定模型。每個角色可以各自設定（見下方），沒設就用 Claude Code 預設 |
-| `--max-budget-usd` | 選填：單次呼叫花費上限（`flow.config.json` 的 `max_budget_usd_per_call`） |
+| `--max-budget-usd` | 選填：單次呼叫花費上限（`flow.config.json` 的 `max_budget_usd_per_call`）。這是照 API 價格換算的估計值，用訂閱時不是真的帳單，維持 `null` 即可 |
 
 **每個角色各自選模型**（`flow.config.json`）：
 
@@ -339,10 +379,13 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 
 ## 九、已知限制（誠實列出）
 
-- **「呼叫 Claude Code 的那一段」沒能用真的 Claude 實跑**：製作環境無法通過 Claude Code 驗證。我驗證過的：指令參數存在於 `claude --help`；失敗時會被視為沒通過；並且用一支「假的 claude」腳本測過整個流程邏輯——開發者偷改 spec.md 被還原、審查者永遠不過會判定卡住、遊戲階段審查者回報 `[模型:axe]` 會退件並撤回發布、模型沒發布時遊戲被擋、model.js 改過後不能發布、dry-run 通過不能發布。其餘（模型檢視器、模型關卡、建置、瀏覽器關卡、截圖、git 分支、報告）都用範例實際跑過。第一次在你電腦實跑時，請先 `--rounds 1`。
-- **隨附的三個模型的「發布」是 dry-run 測試用的**（沒有真的 AI 審查），打包時我已把發布區清空；你要從 `model axe` 真跑開始。
+- **還沒用真的 Claude 實跑過**。流程邏輯都用「假的 claude」（`tests/fake_claude.py`）測過，見「六之 8」：開發者偷改 spec.md 被還原、審查者永遠不過會判定卡住、遊戲階段審查者回報模型的高／中缺陷會退件並撤回發布、審查者 JSON 格式不對會重叫一次再判不通過、守門員擋下不該改的檔案、模型沒發布時遊戲被擋、model.js 改過後不能發布、dry-run 通過不能發布。模型檢視器、模型關卡、建置、瀏覽器關卡、截圖、git 分支、報告也都在測試裡實際跑過。以下兩件事要等實跑才知道：
+  - 真的審查者能不能穩定照 JSON 格式輸出（不行的話會重叫一次，再不行就判那一輪沒通過）。
+  - Claude Code 是否真的會透過 `--settings` 執行改檔守門員。`claude -p` 遇到格式不對的設定檔會默默忽略；就算沒生效，事後還原那一層仍在。
+  第一次實跑請先 `--rounds 1`，並看 `workspace/` 裡的 messages。
+- **`--bare` 模式**：`claude --help` 說它會跳過 hook、而且不讀訂閱登入；官方說它未來會變成 `-p` 的預設。到時候守門員和訂閱登入都會失效，更新 Claude Code 後要留意。
+- **專案裡目前沒有範例模型與範例遊戲**：`models/` 只有空的發布區，`game/` 只有空的 `shots.json`，要從「新增模型」和你自己的遊戲開始。
 - **幀時間**：關卡用完整版 Chromium 的無頭模式，會用到真的顯示卡，但無頭模式的畫面合成方式與正常視窗不同，數字只能當參考。要量最接近玩家的效能：`flow.config.json` 設 `"headed": true`，再設定 `perf.target_avg_ms`。
-- **範例遊戲 `examples/chop-game` 還是 WebGL 寫法**，尚未改成 WebGPU（樹皮著色器用了 `onBeforeCompile` 的 GLSL，要改寫成 TSL）。在改好之前，它過不了 `require_webgpu` 檢查；要先試跑流程可暫時把 `require_webgpu` 設成 `false`。
 - **審查者是 AI，會漏看**。客觀關卡與你的驗收清單才是底線；最後一關一定是你親自看、親自玩。
-- **缺陷標籤靠審查者自己標**：標錯（該標 `[模型:…]` 卻標 `[遊戲]`）會讓遊戲開發者去硬補。報告裡會留下完整意見，你看到可疑處可以手動退件。
+- **缺陷標籤靠審查者自己標**：JSON 的格式由協調器檢查，但「是模型還是遊戲的問題」仍是審查者判斷的。標錯（該標 `"模型"` 卻標 `"遊戲"`）會讓遊戲開發者去硬補。報告裡會留下完整意見，你看到可疑處可以手動退件。
 - 一次只有一個 agent 在改東西（輪流）；要平行開發請改用 git worktree，這版沒有做。

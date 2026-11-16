@@ -92,10 +92,62 @@ def last_game_status():
 sys.path.insert(0, str(SB)); os.chdir(SB)
 import orchestrator as O
 
-t = O.model_defects('## 逐條對照驗收清單\n1. [模型:axe] 符合\n## 缺陷清單\n1. [低][模型:axe] 小問題\n2. [高][模型:axe] 像鋤頭\n3. [中][遊戲] 光線\n## 我最不確定的 3 件事\n- [高][模型:pick] 不確定\n')
-check('#2 只算缺陷清單裡的高/中', t == {'axe': ['2. [高][模型:axe] 像鋤頭']}, t)
-t = O.model_defects('## 問題清單\n1. [中] [模型: axe] 程式審查者的格式\n')
-check('#2 程式審查者的問題清單也會判斷', list(t) == ['axe'], t)
+def rv(verdict, defects, body='## 我最不確定的 3 件事\n- ……'):
+    """組一段審查者輸出：文字段落＋最後的 ```json 區塊"""
+    return body + '\n\n```json\n' + json.dumps({'verdict': verdict, 'defects': defects}, ensure_ascii=False) + '\n```\n'
+
+
+t = O.model_defects(rv('CHANGES_REQUESTED', [
+    {'severity': '低', 'target': '模型', 'model': 'axe', 'problem': '小問題'},
+    {'severity': '高', 'target': '模型', 'model': 'axe', 'where': '01', 'problem': '像鋤頭'},
+    {'severity': '中', 'target': '遊戲', 'problem': '光線'}],
+    body='## 逐條對照驗收清單\n1. [高][模型:pick] 符合\n## 我最不確定的 3 件事\n- [高][模型:pick] 不確定'))
+check('#2 只算 JSON 裡 target 是模型的高/中（文字段落、「低」、遊戲的都不算）', t == {'axe': ['[高][模型:axe] 01：像鋤頭']}, t)
+t = O.model_defects(rv('CHANGES_REQUESTED', [{'severity': '中', 'target': '模型', 'model': 'axe', 'where': 'a.js:3', 'problem': '程式審查者的格式'}]))
+check('#2 程式審查者的缺陷也會判斷', list(t) == ['axe'], t)
+
+# #11 審查結果的固定格式
+check('#11 沒有 JSON 區塊 → NO_VERDICT（舊格式的 VERDICT 行不算）', O.verdict('## 缺陷清單\n（無）\n\nVERDICT: APPROVED') == 'NO_VERDICT')
+check('#11 JSON 壞掉 → BAD_FORMAT', O.verdict('```json\n{"verdict": "APPROVED", "defects": [}\n```') == 'BAD_FORMAT')
+r = O.parse_review(rv('APPROVED', [{'severity': '超高', 'problem': 'x'}]))
+check('#11 嚴重度不是高/中/低 → BAD_FORMAT 並寫明原因', r['verdict'] == 'BAD_FORMAT' and 'severity' in r['error'], r)
+r = O.parse_review(rv('APPROVED', [{'severity': '中', 'target': '模型', 'problem': 'x'}]))
+check('#11 target 是模型卻沒寫模型名稱 → BAD_FORMAT', r['verdict'] == 'BAD_FORMAT' and 'model' in r['error'], r)
+r = O.parse_review('```json\n{"verdict": "APPROVED"}\n```')
+check('#11 少了 defects → BAD_FORMAT', r['verdict'] == 'BAD_FORMAT' and 'defects' in r['error'], r)
+r = O.parse_review(rv('APPROVED', [{'severity': '高', 'problem': '破面'}]))
+check('#11 判 APPROVED 卻列了高/中缺陷 → 協調器改判 CHANGES_REQUESTED', r['verdict'] == 'CHANGES_REQUESTED' and r['note'], r)
+check('#11 判 APPROVED 只列低缺陷 → 維持 APPROVED', O.verdict(rv('APPROVED', [{'severity': '低', 'problem': '可以更好'}])) == 'APPROVED')
+check('#11 有多段 JSON 時只看最後一段', O.verdict(rv('APPROVED', [], body='```json\n{"verdict": "CHANGES_REQUESTED", "defects": []}\n```')) == 'APPROVED')
+t = O.review_text(rv('CHANGES_REQUESTED', [{'severity': '中', 'target': '模型', 'model': 'axe', 'where': '01', 'problem': '像鋤頭'}]))
+check('#11 給開發者看的意見：缺陷轉成「[中][模型:axe] 01：…」，不留 JSON', '1. [中][模型:axe] 01：像鋤頭' in t and '```json' not in t and t.endswith('VERDICT: CHANGES_REQUESTED'), t)
+t = O.review_text(rv('CHANGES_REQUESTED', [{'severity': '低', 'where': '2-side', 'problem': '稍暗'}]))
+check('#11 模型工坊的缺陷沒寫 target → 不加 [遊戲] 標籤', '1. [低] 2-side：稍暗' in t, t)
+
+
+# #12 改檔守門員（gates/guard.py）：直接餵它 Claude Code 會傳的 JSON
+def guard(rules, tool_input, tool='Write', raw=None, cwd=SB / 'models' / 'box'):
+    env = {k: v for k, v in ENV.items() if k != 'FLOW_GUARD_RULES'}
+    if rules is not None:
+        env['FLOW_GUARD_RULES'] = json.dumps(rules)
+    data = raw if raw is not None else json.dumps({'tool_name': tool, 'tool_input': tool_input, 'cwd': str(cwd)})
+    r = subprocess.run([PY, str(SB / 'gates' / 'guard.py')], input=data.encode('utf-8'), capture_output=True, env=env, timeout=60)
+    return r.returncode, r.stderr.decode('utf-8', 'replace')
+
+
+mrule = {'allow_files': [str(SB / 'models' / 'box' / 'model.js')], 'hint': '只能改 model.js。'}
+check('#12 模型開發者：改 model.js → 放行', guard(mrule, {'file_path': str(SB / 'models' / 'box' / 'model.js')})[0] == 0)
+check('#12 模型開發者：相對路徑 model.js → 放行', guard(mrule, {'file_path': 'model.js'})[0] == 0)
+rc_, err_ = guard(mrule, {'file_path': str(SB / 'models' / 'box' / 'spec.md')}, tool='Edit')
+check('#12 模型開發者：改 spec.md → 擋下，並告訴它能改什麼', rc_ == 2 and '只能改 model.js' in err_, (rc_, err_))
+check('#12 模型開發者：用 ../ 繞路改 spec.json → 擋下', guard(mrule, {'file_path': '../box/../box/spec.json'})[0] == 2)
+grule = {'allow_dirs': [str(SB / 'game')], 'deny_files': [str(SB / 'game' / 'shots.json')], 'hint': '只能改遊戲資料夾。'}
+check('#12 遊戲開發者：改遊戲資料夾裡的新檔案 → 放行', guard(grule, {'file_path': str(SB / 'game' / 'src' / 'new.js')})[0] == 0)
+check('#12 遊戲開發者：改鏡頭清單 → 擋下', guard(grule, {'file_path': str(SB / 'game' / 'shots.json')})[0] == 2)
+check('#12 遊戲開發者：改驗收清單 → 擋下', guard(grule, {'file_path': str(SB / 'checks' / 'visual-checklist.md')})[0] == 2)
+check('#12 遊戲開發者：NotebookEdit 也會檢查', guard(grule, {'notebook_path': str(SB / 'checks' / 'x.ipynb')}, tool='NotebookEdit')[0] == 2)
+check('#12 沒有規則 → 擋下（拿不準就不放行）', guard(None, {'file_path': str(SB / 'game' / 'a.js')})[0] == 2)
+check('#12 讀不懂輸入 → 擋下', guard(grule, None, raw='不是 JSON')[0] == 2)
 
 # #10 引用檢查
 proj = SB / 'scanproj' / 'src'; (proj / 'models').mkdir(parents=True)
@@ -134,6 +186,8 @@ g('checkout', '--', 'index.html')
 # 低嚴重度的 [模型:axe] 不退件；第 2 輪沒改動 → 沿用結果、判定卡住
 LOG.unlink(missing_ok=True)
 main_before = g('rev-parse', 'main')
+guard_tmp = lambda: set(Path(tempfile.gettempdir()).glob('flow-guard-*.json'))
+guard_tmp_before = guard_tmp()
 rc, out = orch('run', '--rounds', '4', scenario='game_low')
 st, ws = last_game_status()
 check('#2 低嚴重度與其他段落的 [模型:…] 不會退件', st['state'] != 'blocked_on_model' and st['history'][0]['model_defects'] == [], st)
@@ -142,6 +196,14 @@ calls = [json.loads(l) for l in LOG.read_text('utf-8').splitlines()]
 check('#8 沒改動的那一輪沒有呼叫審查者', sum(1 for c in calls if c['mode'] != 'acceptEdits') == 2, calls)
 check('#7 判定卡住並寫明原因', st['state'] == 'stalled' and '沒有任何改動' in st.get('stall_reason', ''), st)
 check('#6 視覺審查者的讀檔權限是 Read(./**)', any(c['tools'] == 'Read' and c['allowed'] == ['Read(./**)'] for c in calls), calls)
+devc = [c for c in calls if c['mode'] == 'acceptEdits']
+revc = [c for c in calls if c['mode'] != 'acceptEdits']
+grules = [json.loads(c['rules']) for c in devc if c['rules']]
+check('#12 遊戲開發者有掛改檔守門員：可改遊戲資料夾、鏡頭清單不能改',
+      devc and len(grules) == len(devc) and all('guard.py' in (c['hook'] or '') for c in devc) and
+      all(Path(r['allow_dirs'][0]).resolve() == (SB / 'game').resolve() and Path(r['deny_files'][0]).resolve() == (game / 'shots.json').resolve() for r in grules), devc)
+check('#12 審查者沒有掛守門員', revc and all(c['hook'] is None and c['rules'] is None for c in revc), revc)
+check('#12 暫存的 --settings 設定檔用完就刪掉', guard_tmp() == guard_tmp_before, guard_tmp() - guard_tmp_before)
 check('#3 結束後切回 main', g('rev-parse', '--abbrev-ref', 'HEAD') == 'main', g('rev-parse', '--abbrev-ref', 'HEAD'))
 check('#3 main 沒有被動到', g('rev-parse', 'main') == main_before)
 check('#3 AI 的修改在 auto 分支', 'round 1' in g('log', '--oneline', st['branch']) and '<!-- round 1 -->' in g('show', st['branch'] + ':index.html'))
@@ -153,6 +215,20 @@ first_branch = st['branch']
 rc, out = orch('run', '--rounds', '1', scenario='game_ok')
 st2, _ = last_game_status()
 check('#3 第二次的新分支從 main 開出來', g('merge-base', st2['branch'], first_branch) == main_before and st2['state'] == 'approved', st2)
+
+# 審查者格式寫錯 → 重叫一次
+LOG.unlink(missing_ok=True)
+rc, out = orch('run', '--rounds', '1', scenario='game_badfmt')
+st6, _ = last_game_status()
+vis = [c for c in (json.loads(l) for l in LOG.read_text('utf-8').splitlines()) if c['tools'] == 'Read']
+check('#11 審查者格式寫錯 → 重叫一次，第二次寫對就照常通過', st6['state'] == 'approved' and len(vis) == 2 and vis[1]['retry'], (st6, vis))
+LOG.unlink(missing_ok=True)
+rc, out = orch('run', '--rounds', '1', scenario='game_badfmt_always')
+st7, ws7 = last_game_status()
+vis = [c for c in (json.loads(l) for l in LOG.read_text('utf-8').splitlines()) if c['tools'] == 'Read']
+fb7 = (ws7 / 'messages' / 'r01-feedback.md').read_text('utf-8')
+check('#11 重叫後還是寫錯 → 判沒通過（只重叫一次）', st7['history'][0]['visual'] == 'NO_VERDICT' and not st7['history'][0]['approved'] and len(vis) == 2, (st7, vis))
+check('#11 回饋裡寫明審查者格式不對', '審查者的輸出格式不對' in fb7, fb7[-400:])
 
 # 開發者偷改驗收清單、鏡頭清單、偷加檔案 → 還原並警告
 cl_before = (SB / 'checks' / 'visual-checklist.md').read_text('utf-8')
@@ -190,6 +266,15 @@ check('#8 做模型：第 2 輪沒改動 → 沿用結果', len(mst['history']) 
 check('#7 做模型：判定卡住並寫明原因', mst['state'] == 'stalled' and mst.get('stall_reason'), mst)
 mres = json.loads((mruns[-1] / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))
 print('     （模型關卡實際結果：', 'WebGPU 可用、截圖', len(mres['shots']), '張' if mres['shots'] else f"沒有截圖，錯誤：{mres['errors'][:1]}", '）')
+
+# 做模型（不乾跑，用假的 claude）：模型開發者的守門規則只准改這個模型的 model.js
+LOG.unlink(missing_ok=True)
+rc, out = orch('model', 'box', '--rounds', '1')
+calls = [json.loads(l) for l in LOG.read_text('utf-8').splitlines()]
+mr = json.loads(calls[0]['rules']) if calls and calls[0]['rules'] else {}
+check('#12 模型開發者有掛改檔守門員，只准改 model.js',
+      'guard.py' in (calls[0]['hook'] or '') and [Path(p).resolve() for p in mr.get('allow_files', [])] == [(SB / 'models' / 'box' / 'model.js').resolve()]
+      and not mr.get('allow_dirs'), calls)
 
 # ---------- GUI：檢視器頁面隔離 ----------
 lab = SB / 'workspace' / 'lab'; lab.mkdir(parents=True, exist_ok=True)

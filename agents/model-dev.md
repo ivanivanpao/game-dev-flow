@@ -10,7 +10,7 @@
 - 你的工作目錄就是這個模型的資料夾
 
 ## 規則
-1. **只能改 `model.js`。** spec.md、spec.json、checklist.md 是人類擁有的驗收標準，改了會被還原並記錄。
+1. **只能改 `model.js`。** spec.md、spec.json、checklist.md 是人類擁有的驗收標準：用 Edit／Write 改其他檔案會當場被擋下；用其他方式改了，這一輪結束後也會被還原並記錄。
 2. `model.js` 必須是純函式模組：`export const meta = {...}`、`export function build(THREE) { ... return group }`。**不可以 import 任何東西**，THREE 由參數傳入。這樣同一份模型才能原封不動放進檢視器和遊戲。
 3. 遵守 spec.md 的座標約定，不可為了過檢查而改變約定（例如把整個模型平移來湊包圍盒）。
 4. 所有需要被遊戲存取的零件，放進 `group.userData`（例如 `head`），並寫進 meta 說明。
