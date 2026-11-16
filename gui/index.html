@@ -250,7 +250,7 @@ function editor(host, files) {
   function renderPv() { pv.innerHTML = cur && cur.path.endsWith('.md') ? md(ta.value) : '<pre>' + esc(ta.value) + '</pre>'; }
   async function save() {
     if (!cur || !writable) return;
-    try { await api('/api/file', {path: cur.path, content: ta.value}); orig = ta.value; flash(msg, '已儲存 ' + cur.path); markPh(); if (cur.onSave) cur.onSave(); }
+    try { await api('/api/file', {path: cur.path, content: ta.value}); orig = ta.value; host.querySelector('.ro').textContent = ''; flash(msg, '已儲存 ' + cur.path); markPh(); if (cur.onSave) cur.onSave(); }
     catch (e) { flash(msg, e.message, 'bad'); }
   }
   host.querySelector('.sv').onclick = save;
