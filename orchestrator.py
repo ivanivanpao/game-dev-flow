@@ -27,6 +27,7 @@ CFG = json.loads((ROOT / 'flow.config.json').read_text('utf-8'))
 PROJECT = (ROOT / CFG['project_dir']).resolve()
 MODELS = (ROOT / CFG.get('models_dir', 'models')).resolve()
 RELEASED = MODELS / '_released'
+RELEASED.mkdir(parents=True, exist_ok=True)     # models/ 不進版控，重新下載專案時資料夾不存在；先建好，後面的指令才不會當掉
 VERDICT_RE = re.compile(r'VERDICT:\s*(APPROVED|CHANGES_REQUESTED)')
 MODEL_TAG_RE = re.compile(r'\[模型[:：]\s*([\w\-]+)\s*\]')
 DEFECT_SECTIONS = ('缺陷清單', '問題清單')            # 審查者列缺陷的段落標題（視覺審查者／程式審查者）

@@ -222,6 +222,13 @@ try:
 finally:
     srv.terminate(); srv.wait()
 
+# ---------- 重新下載專案（沒有 models/ 資料夾）時，status 不會當掉 ----------
+fresh = TMP / 'fresh'; fresh.mkdir()
+shutil.copy(REAL / 'orchestrator.py', fresh / 'orchestrator.py')
+shutil.copy(SB / 'flow.config.json', fresh / 'flow.config.json')
+r = subprocess.run([PY, str(fresh / 'orchestrator.py'), 'status'], cwd=fresh, capture_output=True, text=True, encoding='utf-8', errors='replace', env=ENV)
+check('沒有 models/ 資料夾時 status 不會當掉，並自動建立 models/_released/', r.returncode == 0 and (fresh / 'models' / '_released').is_dir(), r.stdout + r.stderr)
+
 failed = sum(not ok for _, ok in results)
 print(f"\n共 {len(results)} 項，通過 {len(results) - failed} 項，失敗 {failed} 項")
 os.chdir(REAL)                     # 先離開副本資料夾，Windows 才刪得掉
