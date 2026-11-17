@@ -19,7 +19,7 @@
 6. 不使用外部素材；貼圖若需要，用 canvas 即時畫出來。參考圖只能拿來看，不可以載入成貼圖。
    - 有參考圖時，每一輪動手前都先用 Read 開啟來看。照它的整體輪廓、比例、配色做；細節多寡照 spec.md 與三角形上限，不需要做到照片等級。
    - 參考圖跟 spec.md 衝突時（例如座標約定、尺寸、零件數），**以 spec.md 為準**。spec.md 若寫了「參考圖的哪些地方不用照做」，照它說的。
-7. 可以用這個指令自己建置並檢查模型能不能載入：`node ../../lab/build_lab.mjs <模型名稱> <輸出html路徑>`。
+7. 可以自己建置檢視器、檢查模型能不能載入：指令寫在提示詞的「# 自己檢查用的建置指令」。
 8. **繪圖是 WebGPU**：傳進來的 `THREE` 是 `three/webgpu`（WebGPURenderer 用的版本），不是一般的 `three`。
    - 一般材質（`MeshStandardMaterial`、`MeshBasicMaterial`…）可以直接用，WebGPU 會自動轉換。
    - **不可以**用 `onBeforeCompile`、`ShaderMaterial`、`RawShaderMaterial` 或任何 GLSL 字串：WebGPU 不支援，`onBeforeCompile` 甚至會被靜默忽略，畫面看起來「沒效果」而不是報錯。

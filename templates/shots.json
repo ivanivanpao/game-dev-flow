@@ -1,0 +1,13 @@
+{
+  "ready": "window.__game && window.__game.ready",
+  "settle_ms": 1500,
+  "shots": [
+    {
+      "name": "01-overview",
+      "setup": "【截圖前要在遊戲裡執行的 JS，例如擺鏡頭：window.__game.setCamera([4, 3, 4], [0, 0, 0])。用你的遊戲自己提供的測試介面；不需要就刪掉這一行】",
+      "wait_ms": 800,
+      "describe": "【這張圖應該看到什麼，寫成看圖就能判斷的句子。例如：整個場景，樹在左邊、玩家拿著斧頭站在中間】"
+    }
+  ],
+  "perf": { "seconds": 8 }
+}

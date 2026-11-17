@@ -1,16 +1,8 @@
-workspace/
 __pycache__/
 node_modules/
 dist/
 .DS_Store
 .venv/
 .claude-tmp/
-game/
-models/
-# 你自己的檔案：第一次執行時從 templates/ 建立，更新工具不會動到
-/flow.config.json
-/TASK.md
-/prompt.md
-/human-feedback.md
-/checks/
-/agents.local/
+# 你的專案（每個遊戲一個資料夾：設定、任務、清單、模型、遊戲程式、執行紀錄），更新工具不會動到
+projects/

@@ -59,11 +59,14 @@ python -m venv .venv                                          # 建立專案專�
 
 ### 開始用
 
-雙擊 `gui.bat` 開啟圖形化介面（`http://127.0.0.1:8765/`），在「① 模型工坊」按「新增模型」，填完規格後按「開始做模型」。
+雙擊 `gui.bat` 開啟圖形化介面（`http://127.0.0.1:8765/`）：
+1. 按上方「＋ 新增專案」：一個遊戲一個專案，專案名稱和遊戲資料夾名稱由你取。
+2. 在「① 模型工坊」按「新增模型」，填完規格後按「開始做模型」。
 
 也可以用指令：
 
 ```
+.venv/Scripts/python.exe orchestrator.py new-project game-example       # 建立專案（並設為目前專案）
 .venv/Scripts/python.exe orchestrator.py status                          # 看目前狀態
 .venv/Scripts/python.exe orchestrator.py model axe --dry-run --rounds 1  # 先乾跑一輪（不消耗額度）
 .venv/Scripts/python.exe orchestrator.py model axe                       # 做模型
@@ -72,7 +75,20 @@ python -m venv .venv                                          # 建立專案專�
 .venv/Scripts/python.exe orchestrator.py run                             # 做遊戲
 ```
 
-第一次開介面或執行指令時，會從 `templates/` 建立你自己的檔案：設定 `flow.config.json`、`TASK.md`、`prompt.md`、`human-feedback.md`、驗收清單 `checks/`。這些檔案和 `models/`、`game/`、`workspace/` 都不在工具的版控裡。
+指令都針對「目前專案」；要操作別的專案，在指令後面加 `--project <專案名>`，或用 `use <專案名>` 切換。
+
+你的東西都在 `projects/<專案名>/` 裡，一個遊戲一個資料夾：
+
+```
+projects/game-example/
+├── flow.config.json、TASK.md、prompt.md、human-feedback.md、checks/   ← 從 templates/ 建立
+├── agents.local/      （選用）這個遊戲客製的 AI 角色指令
+├── models/            這個遊戲的模型
+├── game/              你的遊戲程式（名稱由你取，有自己的 git）
+└── workspace/         執行紀錄
+```
+
+`projects/` 整個不在工具的版控裡。
 
 ### 更新
 
@@ -80,7 +96,7 @@ python -m venv .venv                                          # 建立專案專�
 git pull
 ```
 
-只會更新工具本身，你的檔案、模型、遊戲都不會被動到。工具新增的設定項目，你的設定檔裡沒有也會自動用預設值。想客製 AI 角色指令，放進 `agents.local/`（見 [docs/conventions.md](docs/conventions.md)），不要直接改 `agents/`，否則更新時會衝突。
+只會更新工具本身，`projects/` 裡的東西都不會被動到。工具新增的設定項目，你的設定檔裡沒有也會自動用預設值。想客製 AI 角色指令，放進專案的 `agents.local/`（見 [docs/conventions.md](docs/conventions.md)），不要直接改 `agents/`，否則更新時會衝突。
 
 ## 文件
 
@@ -95,7 +111,7 @@ git pull
 
 ## 目前狀態
 
-- 還沒用真的 Claude 實跑過；流程邏輯已用假的 claude 測過（`tests/run_tests.py`，94 項）。第一次實跑請先 `--rounds 1`。
+- 還沒用真的 Claude 實跑過；流程邏輯已用假的 claude 測過（`tests/run_tests.py`，109 項）。第一次實跑請先 `--rounds 1`。
 - 專案裡沒有範例模型與範例遊戲，要從「新增模型」和你自己的遊戲開始。
 - 審查者是 AI，會漏看；最後一關一定是你親自看、親自玩。
 

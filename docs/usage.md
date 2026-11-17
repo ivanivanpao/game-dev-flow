@@ -21,7 +21,23 @@
 
 介面只接受本機連線，只能改你該寫的檔案（model.js 等由 AI 管的檔案、工具內建的 agents/ 只能看），也只能執行協調器的既有指令。
 
-**你的檔案與工具更新**：設定（`flow.config.json`）、`TASK.md`、`prompt.md`、`human-feedback.md`、`checks/` 是你的檔案，不在工具的版控裡。第一次執行協調器或開介面時，會從 `templates/` 自動建立；之後 `git pull` 更新工具只換工具本身，不會動到它們（`models/`、`game/`、`workspace/` 也一樣）。工具新增的設定項目，你的設定檔裡沒有也沒關係，會用 `templates/flow.config.json` 裡的預設值。關閉介面：在 `gui.bat` 開出的黑色視窗按 Ctrl+C。
+關閉介面：在 `gui.bat` 開出的黑色視窗按 Ctrl+C。
+
+## 0. 專案：一個遊戲一個資料夾
+
+你的東西都放在 `projects/<專案名>/`：設定、`TASK.md`、`prompt.md`、`human-feedback.md`、驗收清單 `checks/`、`agents.local/`、`models/`、遊戲資料夾、執行紀錄 `workspace/`。**以下文件裡的 `models/…`、`workspace/…`、`flow.config.json` 等路徑，都是指目前專案資料夾裡的。**
+
+```
+python orchestrator.py new-project game-example                  # 建立專案，遊戲資料夾叫 game
+python orchestrator.py new-project forest --game forest-rpg      # 遊戲資料夾自己取名
+python orchestrator.py use game-example                          # 切換目前專案
+python orchestrator.py status --project forest                   # 其他指令加 --project，可以只對某個專案執行一次
+```
+
+- 介面上方的下拉選單就是目前專案，旁邊「＋ 新增專案」。有工作在跑時不能切換。
+- 新增專案會從 `templates/` 建立設定、任務、清單和 `models/_released/`；遊戲資料夾裡放 `shots.json` 範本，並執行 `git init -b main`（不 commit）。做遊戲前，遊戲資料夾要有第一個 commit。
+- 建置設定（`build_cmd`、`entry`）用預設值（`npm run build`、`dist/index.html`），跟你的遊戲不同就到「設定」改。
+- `projects/` 整個不在工具的版控裡，`git pull` 更新工具不會動到它。工具新增的設定項目，你的設定檔裡沒有也沒關係，會用 `templates/flow.config.json` 裡的預設值；工具新增的範本檔，下次執行時會補進專案。
 
 ## 1. 看目前狀態
 
@@ -101,7 +117,7 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 ## 6. 換成你自己的模型／遊戲
 
 - 新模型：在介面「新增模型」，寫 `spec.md`、`spec.json`（客觀檢查條件＋截圖角度）。遊戲要用的模型，名稱要在 `flow.config.json` 的 `uses_models` 裡（新增時可以勾選順便加入；遊戲用到哪些，就要先發布哪些）。
-- 新遊戲：改 `flow.config.json` 的 `project_dir`、`build_cmd`、`entry`、`shots_spec`（目前是 `game/`、`npm run build`、`dist/index.html`、`game/shots.json`）。
+- 新遊戲：新增一個專案（見第 0 節），每個遊戲各自有設定、模型和紀錄。
 - 遊戲與模型要遵守的約定、鏡頭清單 `shots.json` 的格式，見 [conventions.md](conventions.md)。
 
 ## 7. 改了工具之後：跑自動測試
@@ -113,6 +129,6 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 ```
 
 - 會在系統暫存區建一份專案副本，用「假的 claude」（`tests/fake_claude.py`）跑做模型、做遊戲、GUI 的實際流程。**不呼叫真的 Claude、不消耗訂閱額度、不動你真正的專案和遊戲。**
-- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 94 項，通過 94 項，失敗 0 項」。大約一兩分鐘。
+- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 109 項，通過 109 項，失敗 0 項」。大約一兩分鐘。
 - 全部通過會自動刪掉副本；有失敗會保留副本並印出位置，方便查原因。
 - 如果是**故意**改變某個行為（例如改了退件規則），測試也要跟著改，不然會顯示失敗。

@@ -63,6 +63,8 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 <body>
 <header>
   <h1>遊戲開發流程</h1>
+  <label>專案 <select id="proj" onchange="switchProject(this.value)"></select></label>
+  <button class="b" onclick="document.getElementById('dlg-proj').showModal()">＋ 新增專案</button>
   <span id="env"></span>
   <span style="flex:1"></span>
   <button class="b" onclick="refreshAll()">重新整理</button>
@@ -155,6 +157,16 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   </div>
   <p class="help">會建立 models/代號/ 與待填的 spec.md、spec.json、checklist.md。model.js 由 AI 第一輪自己寫。</p>
   <div class="row"><button class="b p" onclick="newModel()">建立</button><button class="b" onclick="this.closest('dialog').close()">取消</button></div>
+</dialog>
+<dialog id="dlg-proj">
+  <h2>新增專案</h2>
+  <div class="form" style="grid-template-columns:140px 260px">
+    <label>專案名稱（英文）</label><input type="text" id="p-name" placeholder="例如 game-example">
+    <label>遊戲資料夾名稱</label><input type="text" id="p-game" value="game">
+  </div>
+  <p class="help">一個遊戲一個專案，會建立 <code>projects/專案名稱/</code>：設定、TASK.md、prompt.md、human-feedback.md、驗收清單、models/，
+    以及遊戲資料夾（放好 shots.json 範本，並執行 git init）。建好後會切換到這個專案。</p>
+  <div class="row"><button class="b p" onclick="newProject()">建立</button><button class="b" onclick="this.closest('dialog').close()">取消</button></div>
 </dialog>
 <dialog id="zoom" onclick="this.close()"><img id="zoom-img" alt=""></dialog>
 
@@ -318,8 +330,14 @@ function envBadges(e) {
 async function loadOverview() {
   try { OV = await api('/api/overview'); } catch (e) { $('ov-error').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
   if (OV.error) { $('ov-error').innerHTML = `<div class="notice bad">${esc(OV.error)}</div>`; return; }
-  $('ov-error').innerHTML = '';
   $('env').innerHTML = envBadges(OV.env);
+  $('proj').innerHTML = (OV.project ? '' : '<option value="">（還沒有專案）</option>') +
+    OV.projects.map(n => `<option value="${esc(n)}" ${n === OV.project ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  if (!OV.project) {
+    $('ov-error').innerHTML = '<div class="notice">還沒有專案。一個遊戲一個專案：按上方「＋ 新增專案」建立第一個，其他頁面才能使用。</div>';
+    return;
+  }
+  $('ov-error').innerHTML = '';
   $('ov-next').innerHTML = nextSteps(OV);
   $('ov-models').innerHTML = '<table><tr><th>模型</th><th>遊戲用到</th><th>最近一次製作</th><th>發布</th></tr>' +
     OV.models.map(m => `<tr><td><a href="#" onclick="pickModel('${esc(m.name)}');goTab('models');return false">${esc(m.name)}</a>${m.reopen ? ' <span class="tag bad">被退件</span>' : ''}</td>
@@ -330,6 +348,21 @@ async function loadOverview() {
   $('g-status').innerHTML = (!g.project_exists ? `<div class="notice bad">遊戲資料夾 <code>${esc(g.project_dir)}</code> 不存在，做遊戲會失敗。到「設定」改「遊戲資料夾」。</div>` : '') +
     (!g.ready ? `<div class="notice">還有模型沒發布（${esc(g.missing.join('、'))}），做遊戲會被擋下。</div>` : '');
   renderModelList();
+}
+
+// ---------- 專案 ----------
+// 切換或新增專案後整頁重新載入：每個分頁的編輯器、清單、紀錄都換成新專案的（有沒存的修改，瀏覽器會先問）
+async function switchProject(name) {
+  if (!name) return;
+  try { await api('/api/project/use', {name}); location.reload(); }
+  catch (e) { alert(e.message); loadOverview(); }
+}
+async function newProject() {
+  try {
+    const r = await api('/api/project/new', {name: $('p-name').value.trim(), game: $('p-game').value.trim()});
+    if (!r.git_ok) alert('專案已建立，但遊戲資料夾的 git init 失敗，做遊戲前請自己在遊戲資料夾執行 git init -b main：\n' + r.git_output);
+    location.reload();
+  } catch (e) { alert(e.message); }
 }
 
 // ---------- 模型工坊 ----------
@@ -514,10 +547,10 @@ const FIELDS = [
   ['model_reviewers.visual', '模型：視覺審查', 'bool'], ['model_reviewers.code', '模型：程式審查', 'bool'],
   ['reviewers.visual', '遊戲：視覺審查', 'bool'], ['reviewers.code', '遊戲：程式審查', 'bool'],
   ['#', '遊戲專案'],
-  ['project_dir', '遊戲資料夾', 'text', '相對於 game-dev-flow 的路徑，例如 games/my-game'],
+  ['project_dir', '遊戲資料夾', 'text', '相對於專案資料夾（projects/<專案名>/）的路徑，例如 game'],
   ['build_cmd', '建置指令', 'text', '在遊戲資料夾裡執行，把程式打包成一個 HTML'],
   ['entry', '建置產物', 'text', '建置完成後要打開的 HTML（相對於遊戲資料夾）'],
-  ['shots_spec', '截圖清單', 'text', '相對於 game-dev-flow 的路徑'],
+  ['shots_spec', '截圖清單', 'text', '相對於專案資料夾的路徑，例如 game/shots.json'],
   ['uses_models', '遊戲用到的模型', 'uses', '勾選的模型都要先發布，遊戲才能開工'],
   ['extra_checks', '自訂檢查指令', 'list', '一行一個指令，在遊戲資料夾執行，回傳 0 才算通過'],
   ['#', '瀏覽器與效能'],

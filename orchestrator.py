@@ -6,7 +6,12 @@
   第一段「模型工坊」：每個模型獨立開發、測試，通過並經你確認後才「發布」
   第二段「遊戲整合」：遊戲只能用已發布的模型；遊戲關卡發現模型本身的問題，只能退回第一段
 
+專案：每個遊戲一個專案資料夾 projects/<專案名>/，裡面放這個遊戲的設定、任務、清單、模型、遊戲程式、執行紀錄。
+下面的指令都針對「目前專案」（記在 projects/.current）；要指定別的專案，在指令後面加 --project <專案名>。
+
 指令：
+  new-project <專案名> [--game 資料夾名]  建立新專案（從 templates/ 建立設定、任務、清單、models/、遊戲資料夾），並設為目前專案
+  use <專案名>                            切換目前專案
   model <名稱> [--rounds N] [--dry-run]   跑某個模型的開發迴圈（模型工坊）
   lab <名稱>                              建出檢視器 HTML 讓你自己轉著看（不呼叫 AI）
   release <名稱>                          你確認後發布模型（必須剛通過迴圈、且檔案沒被改過）
@@ -22,17 +27,20 @@
 import argparse, datetime, difflib, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, webbrowser
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent             # 工具本身
 TEMPLATES = ROOT / 'templates'
-# 使用者自己的檔案：不進工具的版控，更新工具不會動到。不存在時從 templates/ 的同名範本建立
+PROJECTS = ROOT / 'projects'                        # 每個遊戲一個專案資料夾；整個不進工具的版控
+CURRENT_FILE = PROJECTS / '.current'                # 目前專案的名稱
+NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$')   # 專案名稱、遊戲資料夾名稱：英數字、底線、連字號
+# 專案裡你自己的檔案（相對於專案資料夾）：建立專案時從 templates/ 的同名範本複製；工具以後新增範本，缺的會自動補上
 USER_FILES = ('flow.config.json', 'TASK.md', 'prompt.md', 'human-feedback.md', 'checks/visual-checklist.md', 'checks/model-checklist.md')
 
 
-def ensure_user_files():
-    """使用者的檔案不存在就從範本複製一份；已經存在的絕不覆蓋。回傳這次新建的檔案（相對路徑）"""
+def ensure_user_files(p):
+    """專案 p 裡缺的檔案從範本複製一份；已經存在的絕不覆蓋。回傳這次新建的檔案（相對路徑）"""
     created = []
     for rel_path in USER_FILES:
-        dst, src = ROOT / rel_path, TEMPLATES / rel_path
+        dst, src = p / rel_path, TEMPLATES / rel_path
         if not dst.exists() and src.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst); created.append(rel_path)
@@ -47,24 +55,82 @@ def merge_config(base, over):
     return out
 
 
-def load_config():
-    """實際使用的設定 = templates/flow.config.json（預設值）＋ flow.config.json（你的設定）"""
+def load_config(p):
+    """專案 p 實際使用的設定 = templates/flow.config.json（預設值）＋ 專案的 flow.config.json（你的設定）"""
     base = json.loads((TEMPLATES / 'flow.config.json').read_text('utf-8')) if (TEMPLATES / 'flow.config.json').exists() else {}
-    return merge_config(base, json.loads((ROOT / 'flow.config.json').read_text('utf-8')))
+    return merge_config(base, json.loads((p / 'flow.config.json').read_text('utf-8')))
 
 
 def agent_md(name):
-    """AI 角色說明：agents.local/ 有同名檔案就用你的客製版，否則用工具內建的 agents/"""
-    local = ROOT / 'agents.local' / name
-    return read(local) if local.exists() else read(ROOT / 'agents' / name)
+    """AI 角色說明：目前專案的 agents.local/ 有同名檔案就用你的客製版，否則用工具內建的 agents/"""
+    local = P / 'agents.local' / name if P else None
+    return read(local) if local and local.exists() else read(ROOT / 'agents' / name)
 
 
-CREATED = ensure_user_files()
-CFG = load_config()
-PROJECT = (ROOT / CFG['project_dir']).resolve()
-MODELS = (ROOT / CFG.get('models_dir', 'models')).resolve()
-RELEASED = MODELS / '_released'
-RELEASED.mkdir(parents=True, exist_ok=True)     # models/ 不進版控，重新下載專案時資料夾不存在；先建好，後面的指令才不會當掉
+def project_names():
+    return sorted(d.name for d in PROJECTS.iterdir() if d.is_dir() and NAME_RE.match(d.name)) if PROJECTS.is_dir() else []
+
+
+def current_project():
+    """目前專案的名稱；沒設定、或那個專案已經不在了，就是 None"""
+    try:
+        name = CURRENT_FILE.read_text('utf-8').strip()
+    except OSError:
+        return None
+    return name if name in project_names() else None
+
+
+def use_project(name):
+    """把 name 記成目前專案（之後的指令與介面都針對它）"""
+    if name not in project_names():
+        raise ValueError(f'找不到專案 {name}（projects/{name}/）')
+    CURRENT_FILE.write_text(name, 'utf-8')
+
+
+# 目前專案的路徑與設定：由 set_project() 設定；還沒有任何專案時都是 None
+P = CFG = PROJECT = MODELS = RELEASED = WS = None
+CREATED = []                # 切換到專案時，從範本補上的檔案
+
+
+def set_project(name):
+    """切換到專案 name：讀它的設定，算出遊戲資料夾、模型資料夾、執行紀錄資料夾的位置"""
+    global P, CFG, PROJECT, MODELS, RELEASED, WS, CREATED
+    if name not in project_names():
+        raise ValueError(f'找不到專案 {name}（projects/{name}/）')
+    p = PROJECTS / name
+    CREATED = ensure_user_files(p)
+    P, CFG = p, load_config(p)
+    PROJECT = (p / CFG['project_dir']).resolve()
+    MODELS = (p / CFG.get('models_dir', 'models')).resolve()
+    RELEASED = MODELS / '_released'
+    RELEASED.mkdir(parents=True, exist_ok=True)
+    WS = p / 'workspace'
+
+
+def new_project(name, game='game'):
+    """建立專案 projects/<name>/：設定、任務、清單、models/_released/、遊戲資料夾（含 shots.json 範本、git init），並設為目前專案"""
+    if not NAME_RE.match(name or ''):
+        raise ValueError('專案名稱只能用英文字母、數字、底線、連字號（例如 game-example）')
+    if not NAME_RE.match(game or ''):
+        raise ValueError('遊戲資料夾名稱只能用英文字母、數字、底線、連字號（例如 game）')
+    p = PROJECTS / name
+    if p.exists():
+        raise ValueError(f'projects/{name} 已經存在')
+    p.mkdir(parents=True)
+    ensure_user_files(p)
+    cfg_file = p / 'flow.config.json'
+    c = json.loads(cfg_file.read_text('utf-8'))
+    c['project_dir'], c['shots_spec'] = game, f'{game}/shots.json'      # 遊戲資料夾用你取的名字
+    cfg_file.write_text(json.dumps(c, ensure_ascii=False, indent=2) + '\n', 'utf-8')
+    (p / 'models' / '_released').mkdir(parents=True)
+    g = p / game
+    g.mkdir()
+    shutil.copyfile(TEMPLATES / 'shots.json', g / 'shots.json')
+    rc, out = sh(['git', 'init', '-b', 'main'], g, 60)     # 做遊戲時會開 auto/<時間> 分支，遊戲資料夾必須是 git 專案；只初始化，不 commit
+    use_project(name)
+    return p, (rc == 0, out)
+
+
 REVIEW_JSON_RE = re.compile(r'```json[ \t]*\r?\n(.*?)```', re.S)   # 審查者輸出最後面那段 ```json … ``` 區塊
 VERDICTS = ('APPROVED', 'CHANGES_REQUESTED')           # 審查者能給的結論
 BAD_REVIEW = ('NO_VERDICT', 'BAD_FORMAT')              # 協調器判定的「審查者輸出不合格」：一律當沒通過
@@ -178,7 +244,7 @@ def new_run_dir(prefix):
     base = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     run_id, n = base, 1
     while True:
-        ws = ROOT / 'workspace' / f'{prefix}{run_id}'
+        ws = WS / f'{prefix}{run_id}'
         try:
             ws.mkdir(parents=True)
             return run_id, ws
@@ -438,7 +504,7 @@ def model_inputs(model_js, d, checklist, refs):
 
 
 def build_lab(name, out):
-    rc, o = sh(['node', str(ROOT / 'lab' / 'build_lab.mjs'), name, str(out)], ROOT, 300)
+    rc, o = sh(['node', str(ROOT / 'lab' / 'build_lab.mjs'), str(MODELS / name), str(out)], ROOT, 300)
     return rc == 0, tail(o, 1500)
 
 
@@ -478,7 +544,7 @@ def cmd_model(args):
     mj = d / 'model.js'
     if mj.exists():
         shutil.copy(mj, ws / 'snapshots' / 'r00-model.js')
-    cl = lambda: read(ROOT / 'checks' / 'model-checklist.md') + '\n\n' + read(d / 'checklist.md')
+    cl = lambda: read(P / 'checks' / 'model-checklist.md') + '\n\n' + read(d / 'checklist.md')
     feedback = ''
     reopen = d / 'reopen.md'
     if reopen.exists():
@@ -500,6 +566,8 @@ def cmd_model(args):
         log('模型開發者工作中…')
         prompt = (agent_md('model-dev.md') + f'\n\n---\n# 模型名稱\n{name}\n\n# spec.md（模型規格）\n' + read(d / 'spec.md') +
                   '\n\n# spec.json（客觀檢查條件與截圖角度）\n```json\n' + read(d / 'spec.json') + '\n```\n\n# 驗收清單\n' + cl() + ref_text +
+                  # 輸出放系統暫存區：放在模型資料夾會被當成「偷加檔案」
+                  f'\n\n# 自己檢查用的建置指令\n`node "{ROOT / "lab" / "build_lab.mjs"}" . "{Path(tempfile.gettempdir()) / f"flow-lab-{name}.html"}"`' +
                   '\n\n# 目前的 model.js\n```js\n' + (before or '（還沒有，請從頭建立）') + '\n```\n\n---\n# 上一輪回饋\n' + (feedback or '（第 1 輪，沒有回饋）') +
                   '\n\n---\n# 人類意見\n' + human + f'\n\n現在是第 {rnd} 輪（最多 {rounds} 輪）。')
         # 開發者上工前才記下要保護的檔案（除了這個模型的 model.js，整個工具資料夾都不准動）；
@@ -607,7 +675,7 @@ def latest_model_run(name):
     否則找 axe 的紀錄時，會連 axe-2 的紀錄一起抓進來"""
     pat = re.compile(r'model-' + re.escape(name) + r'-(\d{8}-\d{6})(?:-(\d+))?$')
     runs = []
-    for p in (ROOT / 'workspace').glob(f'model-{name}-*'):
+    for p in WS.glob(f'model-{name}-*'):
         m = pat.match(p.name)
         if m and (p / 'status.json').exists():
             runs.append(((m.group(1), int(m.group(2) or 1)), p))     # 依時間、再依同一秒內的編號排序
@@ -634,7 +702,7 @@ def cmd_release(args):
     ver = (prev['version'] + 1) if prev else 1
     out = RELEASED / name; out.mkdir(parents=True, exist_ok=True)
     shutil.copy(d / 'model.js', out / 'model.js')
-    last_shots = sorted((ROOT / 'workspace' / f"model-{name}-{st['run_id']}" / 'shots').glob('r*'))
+    last_shots = sorted((WS / f"model-{name}-{st['run_id']}" / 'shots').glob('r*'))
     stats = json.loads(read(last_shots[-1] / 'gate-result.json'))['stats'] if last_shots else None
     info = {'name': name, 'version': ver, 'sha256': cur, 'spec_sha256': sha256(d / 'spec.json'),
             'released_at': datetime.datetime.now().isoformat(timespec='seconds'), 'approved_run': st['run_id'], 'dry_run': bool(st.get('dry_run')), 'stats': stats}
@@ -654,7 +722,7 @@ def cmd_unrelease(args):
 
 def cmd_lab(args):
     model_dir(args.name)
-    out = ROOT / 'workspace' / 'lab' / f'{args.name}.html'
+    out = WS / 'lab' / f'{args.name}.html'
     ok, o = build_lab(args.name, out)
     if not ok:
         sys.exit(o)
@@ -718,7 +786,7 @@ def gate_browser(shots_dir):
     if not entry.exists():
         return {'ok': False, 'errors': [f'找不到建置產物 {entry}'], 'shots': [], 'perf': None, 'violations': [], 'warnings': []}
     cmd = [sys.executable, str(ROOT / 'gates' / 'browser_gate.py'), '--entry', str(entry),
-           '--spec', str((ROOT / CFG['shots_spec']).resolve()), '--out', str(shots_dir), '--viewport', CFG['viewport']]
+           '--spec', str((P / CFG['shots_spec']).resolve()), '--out', str(shots_dir), '--viewport', CFG['viewport']]
     if CFG.get('require_webgpu', True):
         cmd += ['--require-webgpu']
     if browser_args():
@@ -756,7 +824,8 @@ def models_context():
         rel = released_info(m)
         if not rel:
             continue
-        parts.append(f"## 模型 {m}（已發布 v{rel['version']}，引用路徑：models/_released/{m}/model.js）\n" + read(MODELS / m / 'spec.md') +
+        path = os.path.relpath(RELEASED / m / 'model.js', PROJECT).replace('\\', '/')     # 從遊戲資料夾算起的相對路徑
+        parts.append(f"## 模型 {m}（已發布 v{rel['version']}，引用路徑（從遊戲資料夾根目錄算起）：{path}）\n" + read(MODELS / m / 'spec.md') +
                      f"\n尺寸/統計：{json.dumps(rel.get('stats'), ensure_ascii=False)}")
     return '\n\n'.join(parts) or '（沒有已發布的模型）'
 
@@ -764,7 +833,9 @@ def models_context():
 # ---------- 遊戲資料夾的 git 分支 ----------
 # 分支就像遊戲的「存檔槽」：你的程式在原本的分支（通常是 main）。做遊戲時，工具另開一個 auto/<時間> 分支給 AI 改，
 # 結束後切回你原本的分支。AI 的修改只會在 auto/<時間> 裡，你滿意才自己合併。
-BRANCH_NOTE = ROOT / 'workspace' / 'game-branch.json'     # 紙條：這次是從哪個分支開始的（中途被強制停止時，下次靠它切回去）
+def branch_note():
+    """紙條：這次是從哪個分支開始的（中途被強制停止時，下次靠它切回去）"""
+    return WS / 'game-branch.json'
 
 
 def git_ok(*args):
@@ -794,7 +865,7 @@ def git_start(run_id):
     if cur.startswith('auto/'):
         # 上一次被中途強制停止（例如按了介面的「停止」），沒切回原本的分支：先收尾
         try:
-            note = json.loads(read(BRANCH_NOTE, '{}') or '{}')
+            note = json.loads(read(branch_note(), '{}') or '{}')
         except json.JSONDecodeError:
             note = {}
         if note.get('project') != str(PROJECT) or not note.get('base'):
@@ -812,8 +883,8 @@ def git_start(run_id):
         raise RuntimeError('遊戲資料夾有還沒 commit 的修改。為了不動到你的分支，這次不開始。\n'
                            '請先 commit（或還原）下面這些檔案，再按一次開始：\n' + tail(dirty, 1500))
     branch = f'auto/{run_id}'
-    BRANCH_NOTE.parent.mkdir(parents=True, exist_ok=True)
-    BRANCH_NOTE.write_text(json.dumps({'project': str(PROJECT), 'base': cur, 'branch': branch}, ensure_ascii=False), 'utf-8')
+    branch_note().parent.mkdir(parents=True, exist_ok=True)
+    branch_note().write_text(json.dumps({'project': str(PROJECT), 'base': cur, 'branch': branch}, ensure_ascii=False), 'utf-8')
     git_ok('checkout', '-b', branch)
     return cur, branch
 
@@ -824,7 +895,7 @@ def git_finish(base, branch):
         if git_ok('status', '--porcelain'):
             git_ok('add', '-A'); git_ok('commit', '-m', '結束時留下的修改')
         git_ok('checkout', base)
-        BRANCH_NOTE.unlink(missing_ok=True)
+        branch_note().unlink(missing_ok=True)
         log(f'遊戲資料夾已切回 {base}；AI 的修改在 {branch} 分支')
         return f'遊戲資料夾已切回 `{base}`；AI 的修改都在 `{branch}` 分支。'
     except RuntimeError as e:
@@ -851,13 +922,13 @@ def cmd_run(args):
         sys.exit(str(e))
     log('原本的分支：', base, '｜AI 用的分支：', branch)
     (ws / 'messages').mkdir()
-    (ROOT / 'workspace' / 'LATEST').write_text(run_id, 'utf-8')
+    (WS / 'LATEST').write_text(run_id, 'utf-8')
     status = {'kind': 'game', 'run_id': run_id, 'state': 'running', 'round': 0, 'history': [], 'base': base, 'branch': branch}
 
     def save():
         (ws / 'status.json').write_text(json.dumps(status, ensure_ascii=False, indent=2), 'utf-8')
 
-    shots = (ROOT / CFG['shots_spec']).resolve()
+    shots = (P / CFG['shots_spec']).resolve()
 
     def protect_list():
         """遊戲開發者只能改遊戲資料夾；工具資料夾全部保護，遊戲資料夾裡的鏡頭清單（驗收標準）也保護"""
@@ -867,18 +938,18 @@ def cmd_run(args):
     feedback = ''
     prev = None                     # 上一輪的結果（判斷「沒改動就沿用」與「卡住」用）
     no_change = same_fail = 0       # 連續「沒任何改動」的輪數、連續「客觀檢查失敗項目完全相同」的輪數
-    checklist = lambda: read(ROOT / 'checks' / 'visual-checklist.md')
+    checklist = lambda: read(P / 'checks' / 'visual-checklist.md')
     try:
         for rnd in range(1, rounds + 1):
             status['round'] = rnd; save()
             log(f'===== 遊戲第 {rnd} 輪 =====')
             entry = {'round': rnd}
-            human = read(ROOT / 'human-feedback.md')
+            human = read(P / 'human-feedback.md')
             before = git_ok('rev-parse', 'HEAD')
 
             log('開發者工作中…')
-            dev_prompt = (agent_md('dev.md') + '\n\n---\n# TASK.md\n' + read(ROOT / 'TASK.md') +
-                          '\n\n---\n# prompt.md（設計文件）\n' + read(ROOT / 'prompt.md') +
+            dev_prompt = (agent_md('dev.md') + '\n\n---\n# TASK.md\n' + read(P / 'TASK.md') +
+                          '\n\n---\n# prompt.md（設計文件）\n' + read(P / 'prompt.md') +
                           '\n\n---\n# 可用的已發布模型（只能用，不能改）\n' + models_context() +
                           f"\n\n---\n# 專案建置指令\n{CFG['build_cmd']}\n\n---\n# 上一輪回饋\n" + (feedback or '（第 1 輪，沒有回饋）') +
                           '\n\n---\n# 人類意見\n' + human + f'\n\n現在是第 {rnd} 輪（最多 {rounds} 輪）。')
@@ -893,7 +964,7 @@ def cmd_run(args):
             entry['changed'] = bool(diff)
 
             # 這一輪的「輸入」：遊戲程式、驗收清單、鏡頭清單、任務、已發布模型。跟上一輪完全一樣，重跑結果也會一樣
-            inputs = fingerprint(git_ok('rev-parse', 'HEAD^{tree}'), checklist(), read(shots), read(ROOT / 'TASK.md'), models_context())
+            inputs = fingerprint(git_ok('rev-parse', 'HEAD^{tree}'), checklist(), read(shots), read(P / 'TASK.md'), models_context())
             shots_dir = ws / 'shots' / f'r{rnd:02d}'
             if prev and inputs == prev['inputs'] and not reverted:
                 log('這一輪沒有任何改動：沿用上一輪的檢查與審查結果，不再呼叫審查者（省 AI 用量）')
@@ -920,7 +991,7 @@ def cmd_run(args):
                         entry['visual'] = verdict(vis_out)
                     if CFG['reviewers'].get('code'):
                         log('程式審查者（看 diff）…')
-                        code_out = code_review(diff, read(ROOT / 'TASK.md'), PROJECT, dry, 'game_code')
+                        code_out = code_review(diff, read(P / 'TASK.md'), PROJECT, dry, 'game_code')
                         (ws / 'messages' / f'r{rnd:02d}-review-code.md').write_text(code_out, 'utf-8')
                         entry['code'] = verdict(code_out)
             gates_ok = bool(gm['ok'] and gb['ok'] and gbr and gbr['ok'] and gp['ok'] and all(x['rc'] == 0 for x in gx) and not reverted)
@@ -1042,7 +1113,7 @@ def notify(state, report):
 
 
 def cmd_gates(args):
-    ws = ROOT / 'workspace' / 'gates-only'
+    ws = WS / 'gates-only'
     shutil.rmtree(ws, ignore_errors=True); ws.mkdir(parents=True)
     gm = gate_models(); log('模型檢查：', '通過' if gm['ok'] else '失敗'); [print('  -', p) for p in gm['problems']]
     gb = gate_build(); log('建置：', '通過' if gb['ok'] else '失敗'); print(gb['output'] if not gb['ok'] else '')
@@ -1058,7 +1129,7 @@ def cmd_gates(args):
 
 
 def cmd_add_check(args):
-    p = (MODELS / args.model / 'checklist.md') if args.model else (ROOT / 'checks' / 'visual-checklist.md')
+    p = (MODELS / args.model / 'checklist.md') if args.model else (P / 'checks' / 'visual-checklist.md')
     if args.model:
         model_dir(args.model)
     with p.open('a', encoding='utf-8') as f:
@@ -1066,20 +1137,56 @@ def cmd_add_check(args):
     log('已加入驗收清單：', p.relative_to(ROOT), '←', args.text)
 
 
+def cmd_new_project(args):
+    try:
+        p, (git_ok_, git_out) = new_project(args.name, args.game)
+    except ValueError as e:
+        sys.exit(str(e))
+    log(f'已建立專案 {args.name}：{p}，並設為目前專案')
+    log(f'遊戲資料夾：{p / args.game}（已放 shots.json 範本）')
+    if not git_ok_:
+        log('警告：遊戲資料夾 git init 失敗，做遊戲前請自己在遊戲資料夾執行 git init -b main：' + tail(git_out, 300))
+    log('接下來：填 TASK.md、prompt.md、遊戲資料夾裡的 shots.json；做遊戲前遊戲資料夾要有第一個 commit')
+
+
+def cmd_use(args):
+    try:
+        use_project(args.name)
+    except ValueError as e:
+        sys.exit(f"{e}。現有的專案：{'、'.join(project_names()) or '（沒有）'}")
+    log(f'目前專案：{args.name}')
+
+
 def main():
     ap = argparse.ArgumentParser(description='遊戲開發自動流程協調器（模型工坊 → 發布 → 遊戲整合）')
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('--project', help='要操作的專案（projects/ 底下的資料夾名稱）；不寫就用目前專案')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    m = sub.add_parser('model'); m.add_argument('name'); m.add_argument('--rounds', type=int); m.add_argument('--dry-run', action='store_true')
+    np_ = sub.add_parser('new-project'); np_.add_argument('name'); np_.add_argument('--game', default='game', help='遊戲資料夾名稱（預設 game）')
+    sub.add_parser('use').add_argument('name')
+    m = sub.add_parser('model', parents=[common]); m.add_argument('name'); m.add_argument('--rounds', type=int); m.add_argument('--dry-run', action='store_true')
     for k in ('lab', 'unrelease'):
-        sub.add_parser(k).add_argument('name')
-    rl = sub.add_parser('release'); rl.add_argument('name'); rl.add_argument('--allow-dry-run', action='store_true')
-    sub.add_parser('status')
-    r = sub.add_parser('run'); r.add_argument('--rounds', type=int); r.add_argument('--dry-run', action='store_true')
-    sub.add_parser('gates')
-    c = sub.add_parser('add-check'); c.add_argument('text'); c.add_argument('--model')
+        sub.add_parser(k, parents=[common]).add_argument('name')
+    rl = sub.add_parser('release', parents=[common]); rl.add_argument('name'); rl.add_argument('--allow-dry-run', action='store_true')
+    sub.add_parser('status', parents=[common])
+    r = sub.add_parser('run', parents=[common]); r.add_argument('--rounds', type=int); r.add_argument('--dry-run', action='store_true')
+    sub.add_parser('gates', parents=[common])
+    c = sub.add_parser('add-check', parents=[common]); c.add_argument('text'); c.add_argument('--model')
     a = ap.parse_args()
+    if a.cmd == 'new-project':
+        return cmd_new_project(a)
+    if a.cmd == 'use':
+        return cmd_use(a)
+    name = a.project or current_project()
+    if not name:
+        sys.exit('還沒有專案。先建立一個：python orchestrator.py new-project <專案名>（或在介面按「新增專案」）')
+    try:
+        set_project(name)
+    except ValueError as e:
+        sys.exit(f"{e}。現有的專案：{'、'.join(project_names()) or '（沒有）'}")
+    log(f'專案：{name}')
     if CREATED:
-        log('第一次使用：已從 templates/ 建立你的檔案：' + '、'.join(CREATED) + '（之後更新工具不會動到它們）')
+        log('已從 templates/ 補上這個專案缺的檔案：' + '、'.join(CREATED))
     sys.exit({'model': cmd_model, 'lab': cmd_lab, 'release': cmd_release, 'unrelease': cmd_unrelease, 'status': cmd_status,
               'run': cmd_run, 'gates': cmd_gates, 'add-check': cmd_add_check}[a.cmd](a) or 0)
 

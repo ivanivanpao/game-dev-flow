@@ -2,20 +2,18 @@
 
 ## 資料夾
 
+分成兩部分：**工具本身**（在版控裡，`git pull` 更新）和**你的專案**（`projects/`，不在版控裡，更新不會動到）。
+
 ```
-game-dev-flow/
+game-dev-flow/                  ← 工具本身
 ├── README.md
 ├── docs/                       ← 說明文件
-├── templates/                  ← 你的檔案的範本（flow.config.json、TASK.md、prompt.md、human-feedback.md、checks/）
-│                                  第一次執行時複製成下面標「你的」的檔案；設定也拿它當預設值，你的設定少了哪項就用這裡的
-├── flow.config.json            ← 設定（你的）
 ├── orchestrator.py             ← 協調器（所有指令的入口）
 ├── gui.bat                     ← 雙擊啟動圖形化介面
 ├── gui/                        ← 圖形化介面（server.py 本機伺服器、index.html 網頁）
 ├── package.json                ← 模型檢視器需要 three 與 esbuild（根目錄 npm install）
 ├── requirements.txt            ← Python 套件（playwright）
 ├── tests/                      ← 工具本身的自動測試（run_tests.py、假的 claude：fake_claude.py）
-├── prompt.md / TASK.md / human-feedback.md   ← 遊戲階段：設計文件／本輪任務／你的意見（你的）
 ├── lab/                        ← 模型檢視器（WebGPU；lab.js、lab.template.html、build_lab.mjs）
 ├── gates/
 │   ├── model_gate.py           ← 模型關卡（幾何檢查＋多角度截圖）
@@ -24,28 +22,38 @@ game-dev-flow/
 ├── agents/                     ← 各 agent 的指令（工具內建，隨更新換新；介面上只能看）
 │   ├── model-dev.md、reviewer-model-visual.md      ← 模型工坊用
 │   └── dev.md、reviewer-visual.md、reviewer-code.md ← 遊戲整合用
-├── agents.local/               ← （選用，你的）客製的 agent 指令：放同名檔案就取代 agents/ 裡的那份；
-│                                  代價是工具更新那份指令時，你的不會跟著更新
-├── checks/                     ← （你的）
-│   ├── model-checklist.md      ← 所有模型共通的驗收清單
-│   └── visual-checklist.md     ← 遊戲的累積式驗收清單
-├── models/                     ← 不進這個工具的版控（.gitignore）
-│   ├── <名稱>/                 ← 在介面「新增模型」建立，每個模型一個資料夾：
-│   │     model.js              ←   純函式 build(THREE)，唯一會被 AI 改的檔（第 1 輪由 AI 建立）
-│   │     spec.md               ←   模型規格（人話：長什麼樣、座標約定、不可以什麼）
-│   │     spec.json             ←   客觀檢查條件＋截圖角度（範本預設 4 個角度）
-│   │     checklist.md          ←   這個模型專屬的累積清單
-│   │     human-feedback.md     ←   你對這個模型的意見（第一次在介面編輯時才建立）
-│   │     ref*.png／jpg／webp    ←   （選填）參考圖：開發者與視覺審查者每輪都會看；最多 4 張、每張 5MB 以內
-│   │     reopen.md             ←   （遊戲階段退件時自動產生）
-│   └── _released/<名稱>/       ← 發布區：model.js、release.json（版本、sha256）、history.jsonl
-├── game/                       ← 你的遊戲專案（flow.config.json 的 project_dir）；不進這個工具的版控，有自己的 git
-│     shots.json                ←   鏡頭清單：每張截圖怎麼擺場景、應該看到什麼
-└── workspace/                  ← 執行時自動產生
-    ├── model-<名稱>-<時間>/    ← 模型迴圈：messages/、snapshots/（每輪 model.js 快照）、shots/、REPORT.md
-    ├── <時間>/                 ← 遊戲迴圈：messages/、shots/、REPORT.md
-    └── lab/<名稱>.html         ← `lab` 指令建出的檢視器
+├── templates/                  ← 新專案的範本：flow.config.json、TASK.md、prompt.md、human-feedback.md、checks/、shots.json
+│                                  設定也拿它當預設值，你的設定少了哪項就用這裡的
+│
+└── projects/                   ← 你的專案，一個遊戲一個資料夾（不進工具的版控）
+    ├── .current                ← 目前專案的名稱（介面的下拉選單、指令 use 會改它）
+    └── <專案名>/
+        ├── flow.config.json    ← 這個遊戲的設定
+        ├── prompt.md / TASK.md / human-feedback.md   ← 設計文件／本輪任務／你的意見
+        ├── checks/
+        │   ├── model-checklist.md   ← 這個遊戲所有模型共通的驗收清單
+        │   └── visual-checklist.md  ← 遊戲的累積式驗收清單
+        ├── agents.local/       ← （選用）客製的 agent 指令：放同名檔案就取代 agents/ 裡的那份；
+        │                          代價是工具更新那份指令時，你的不會跟著更新
+        ├── models/
+        │   ├── <名稱>/         ← 在介面「新增模型」建立，每個模型一個資料夾：
+        │   │     model.js      ←   純函式 build(THREE)，唯一會被 AI 改的檔（第 1 輪由 AI 建立）
+        │   │     spec.md       ←   模型規格（人話：長什麼樣、座標約定、不可以什麼）
+        │   │     spec.json     ←   客觀檢查條件＋截圖角度（範本預設 4 個角度）
+        │   │     checklist.md  ←   這個模型專屬的累積清單
+        │   │     human-feedback.md  ← 你對這個模型的意見（第一次在介面編輯時才建立）
+        │   │     ref*.png／jpg／webp ← （選填）參考圖：開發者與視覺審查者每輪都會看；最多 4 張、每張 5MB 以內
+        │   │     reopen.md     ←   （遊戲階段退件時自動產生）
+        │   └── _released/<名稱>/    ← 發布區：model.js、release.json（版本、sha256）、history.jsonl
+        ├── <遊戲資料夾>/       ← 你的遊戲程式（名稱在新增專案時取，預設 game；設定的 project_dir），有自己的 git
+        │     shots.json        ←   鏡頭清單：每張截圖怎麼擺場景、應該看到什麼
+        └── workspace/          ← 執行時自動產生
+            ├── model-<名稱>-<時間>/  ← 模型迴圈：messages/、snapshots/（每輪 model.js 快照）、shots/、REPORT.md
+            ├── <時間>/         ← 遊戲迴圈：messages/、shots/、REPORT.md
+            └── lab/<名稱>.html ← `lab` 指令建出的檢視器
 ```
+
+設定裡的路徑（`project_dir`、`shots_spec`、`models_dir`）都是相對於專案資料夾。
 
 ## 模型（model.js）的約定
 
@@ -62,10 +70,10 @@ game-dev-flow/
 4. 建置指令一個就能跑完，結果是一個可直接開啟的 HTML。
 5. 只准 WebGPU：用 `three/webgpu` 的 `WebGPURenderer`，`await renderer.init()` 後確認 `renderer.backend.isWebGPUBackend`，再設定 `window.__renderBackend = 'webgpu'`。關卡會檢查這個值（`flow.config.json` 的 `require_webgpu`，預設開啟）。瀏覽器不支援時要顯示訊息並停止，不退回 WebGL。
 
-遊戲裡引用模型的寫法（只能引用 `_released`）：
+遊戲裡引用模型的寫法（只能引用 `_released`）。遊戲資料夾和 `models/` 在同一個專案資料夾裡，路徑從檔案所在位置往上找，例如 `game/src/main.js`：
 
 ```js
-import { build as buildAxe, meta as axeMeta } from '../../../models/_released/axe/model.js';
+import { build as buildAxe, meta as axeMeta } from '../../models/_released/axe/model.js';
 const axe = buildAxe(THREE);        // THREE 由遊戲傳入，模型自己不 import 任何東西
 ```
 

@@ -24,26 +24,56 @@ sys.dont_write_bytecode = True                 # 匯入 orchestrator 時不要�
 
 ROOT = Path(__file__).resolve().parent.parent
 GUI = Path(__file__).resolve().parent
-WS = ROOT / 'workspace'
 sys.path.insert(0, str(ROOT))
 
 TOKEN = secrets.token_urlsafe(24)
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$')     # 模型名稱：英數字、底線、連字號
 ALLOWED_HOSTS = set()                                          # 啟動後依實際埠號填入
 
+
+# ---------- 目前專案 ----------
+# 介面所有頁面都針對「目前專案」（projects/.current）；切換專案就是改這個檔案，跟指令 use 一樣
+def orch(reload=False):
+    """匯入協調器並切到目前專案。reload：重讀程式與設定（總覽用，才會拿到最新狀態）"""
+    import orchestrator as O
+    if reload:
+        O = importlib.reload(O)
+    cur = O.current_project()
+    if cur:
+        O.set_project(cur)
+    return O
+
+
+def pdir():
+    """目前專案的資料夾；還沒有專案就丟出錯誤（訊息會顯示在介面上）"""
+    O = orch()
+    if not O.current_project():
+        raise ValueError('還沒有專案，請先在上方按「新增專案」')
+    return O.P
+
+
+def ws_dir():
+    """目前專案的執行紀錄資料夾"""
+    return pdir() / 'workspace'
+
+
 # ---------- 設定與路徑 ----------
 def cfg():
-    """實際使用的設定（範本預設值＋你的設定），跟協調器讀到的一樣"""
-    import orchestrator as O
-    return O.load_config()
+    """目前專案實際使用的設定（範本預設值＋你的設定），跟協調器讀到的一樣"""
+    pdir()
+    return orch().CFG
 
 
 def models_dir():
-    return (ROOT / cfg().get('models_dir', 'models')).resolve()
+    pdir()
+    return orch().MODELS
 
 
 def model_names():
-    d = models_dir()
+    try:
+        d = models_dir()
+    except ValueError:                       # 還沒有專案
+        return []
     return sorted(p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith('_')) if d.exists() else []
 
 
@@ -56,15 +86,15 @@ def inside(p, base):
 
 
 def shots_spec_path():
-    """遊戲的鏡頭清單（位置由設定決定）；必須在專案內且是 .json"""
+    """遊戲的鏡頭清單（位置由設定決定）；必須在專案資料夾內且是 .json"""
     try:
-        s = cfg().get('shots_spec')
+        s, p0 = cfg().get('shots_spec'), pdir()
     except Exception:
         return None
     if not s:
         return None
-    p = (ROOT / s).resolve()
-    return p if inside(p, ROOT) and p.suffix == '.json' else None
+    p = (p0 / s).resolve()
+    return p if inside(p, p0) and p.suffix == '.json' else None
 
 
 MODEL_EDITABLE = ('spec.md', 'spec.json', 'checklist.md', 'human-feedback.md')
@@ -72,14 +102,22 @@ MODEL_READONLY = ('model.js', 'reopen.md')
 
 
 def resolve_file(rel, write=False):
-    """把網頁傳來的相對路徑轉成實際路徑；不在白名單就回傳 None"""
+    """把網頁傳來的相對路徑轉成實際路徑；不在白名單就回傳 None。
+    agents/ 是工具內建的（在工具資料夾），其他檔案都在目前專案的資料夾裡"""
     rel = (rel or '').replace('\\', '/').strip('/')
     if not rel or '..' in rel.split('/'):
         return None
-    p = (ROOT / rel).resolve()
-    if not inside(p, ROOT):
-        return None
     parts = rel.split('/')
+    if parts[0] == 'agents':
+        base = ROOT
+    else:
+        try:
+            base = pdir()
+        except ValueError:
+            return None
+    p = (base / rel).resolve()
+    if not inside(p, base):
+        return None
     ok_write = (
         rel in ('prompt.md', 'TASK.md', 'human-feedback.md', 'flow.config.json')
         or (len(parts) == 2 and parts[0] in ('checks', 'agents.local') and parts[1].endswith('.md'))
@@ -118,11 +156,14 @@ def overview():
         'node_modules': (ROOT / 'node_modules' / 'three').exists(),
     }}
     try:
-        import orchestrator as O
-        O = importlib.reload(O)            # 每次重讀，才會拿到最新的設定與狀態
+        O = orch(reload=True)              # 每次重讀，才會拿到最新的設定與狀態
     except Exception as e:
-        out['error'] = f'讀取設定失敗（flow.config.json 格式錯誤？）：{e}'
+        out['error'] = f'讀取設定失敗（專案的 flow.config.json 格式錯誤？）：{e}'
         return out
+    out['projects'] = O.project_names()
+    out['project'] = O.current_project()
+    if not out['project']:
+        return out                         # 還沒有專案：介面只顯示「新增專案」
     c = O.CFG
     uses = c.get('uses_models', [])
     models = []
@@ -148,7 +189,7 @@ def overview():
         'models': models, 'uses_models': uses,
         'game': {'ready': not missing, 'missing': missing, 'project_dir': c.get('project_dir'), 'project_exists': proj.exists(),
                  'shots_spec': c.get('shots_spec'), 'shots_exists': bool(sp and sp.exists())},
-        'todo': [f for f in ('prompt.md', 'TASK.md') if has_placeholder(ROOT / f)],
+        'todo': [f for f in ('prompt.md', 'TASK.md') if has_placeholder(O.P / f)] + (['shots.json'] if sp and has_placeholder(sp) else []),
     })
     return out
 
@@ -170,9 +211,10 @@ def start_job(args, label):
     with LOCK:
         if job_running():
             raise RuntimeError('已經有工作在跑：' + JOB['cmd'])
-        p = subprocess.Popen([sys.executable, str(ROOT / 'orchestrator.py'), *args], cwd=ROOT,
+        full = with_project(args)
+        p = subprocess.Popen([sys.executable, str(ROOT / 'orchestrator.py'), *full], cwd=ROOT,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env=child_env())
-        JOB.update(proc=p, cmd=label, log=[], started=datetime.datetime.now().isoformat(timespec='seconds'), ended=None, rc=None)
+        JOB.update(proc=p, cmd=f'{label}（專案 {full[-1]}）', log=[], started=datetime.datetime.now().isoformat(timespec='seconds'), ended=None, rc=None)
 
     def pump():
         for line in p.stdout:
@@ -196,9 +238,15 @@ def stop_job():
     return True
 
 
+def with_project(args):
+    """協調器指令明確加上目前專案（不靠 projects/.current，避免執行途中被切換）"""
+    pdir()
+    return [*args, '--project', orch().current_project()]
+
+
 def run_quick(args, timeout=300):
-    """短指令（release、unrelease、lab、add-check）直接等它跑完"""
-    r = subprocess.run([sys.executable, str(ROOT / 'orchestrator.py'), *args], cwd=ROOT, capture_output=True, text=True,
+    """短指令（release、unrelease、add-check）直接等它跑完"""
+    r = subprocess.run([sys.executable, str(ROOT / 'orchestrator.py'), *with_project(args)], cwd=ROOT, capture_output=True, text=True,
                        encoding='utf-8', errors='replace', env=child_env(), timeout=timeout)
     return {'rc': r.returncode, 'output': (r.stdout or '') + (r.stderr or '')}
 
@@ -232,8 +280,8 @@ def do_cmd(b):
         return run_quick([cmd, name])
     if cmd == 'lab':
         # 直接呼叫建置腳本，不用 orchestrator 的 lab 指令（那個會再自己開一個 file:// 分頁）
-        out = WS / 'lab' / f'{name}.html'
-        r = subprocess.run(['node', str(ROOT / 'lab' / 'build_lab.mjs'), name, str(out)], cwd=ROOT, capture_output=True,
+        out = ws_dir() / 'lab' / f'{name}.html'
+        r = subprocess.run(['node', str(ROOT / 'lab' / 'build_lab.mjs'), str(models_dir() / name), str(out)], cwd=ROOT, capture_output=True,
                            text=True, encoding='utf-8', errors='replace', timeout=300)
         return {'rc': r.returncode, 'output': (r.stdout or '') + (r.stderr or ''), 'url': f'/ws/lab/{name}.html?t={TOKEN}'}
     if cmd == 'add-check':
@@ -305,16 +353,20 @@ def new_model(b):
         c = cfg()
         if name not in c.setdefault('uses_models', []):
             c['uses_models'].append(name)
-            write_text(ROOT / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
+            write_text(pdir() / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
     return {'created': name}
 
 
 # ---------- 執行紀錄 ----------
 def list_runs():
-    if not WS.exists():
+    try:
+        ws = ws_dir()
+    except ValueError:                       # 還沒有專案
+        return []
+    if not ws.exists():
         return []
     runs = []
-    for d in WS.iterdir():
+    for d in ws.iterdir():
         if not d.is_dir() or d.name == 'lab':
             continue
         st = {}
@@ -330,8 +382,9 @@ def list_runs():
 
 
 def run_files(run_id):
-    d = (WS / run_id).resolve()
-    if not inside(d, WS) or not d.is_dir():
+    ws = ws_dir()
+    d = (ws / run_id).resolve()
+    if not inside(d, ws) or not d.is_dir():
         raise ValueError('找不到這筆紀錄')
     files = [str(p.relative_to(d)).replace('\\', '/') for p in sorted(d.rglob('*'))
              if p.is_file() and p.suffix in ('.md', '.json', '.png') and p.name != 'status.json']
@@ -405,18 +458,22 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, run_files(q.get('id', '')))
             if u.path == '/api/lists':
                 return self._send(200, {'agents': sorted(p.name for p in (ROOT / 'agents').glob('*.md')),
-                                        'agents_local': sorted(p.name for p in (ROOT / 'agents.local').glob('*.md')),
-                                        'checks': sorted(p.name for p in (ROOT / 'checks').glob('*.md'))})
+                                        'agents_local': sorted(p.name for p in (pdir() / 'agents.local').glob('*.md')),
+                                        'checks': sorted(p.name for p in (pdir() / 'checks').glob('*.md'))})
             self._send(404, {'error': '沒有這個路徑'})
         except Exception as e:
             self._send(400, {'error': str(e)})
 
     def _serve_ws(self, rel):
-        """唯讀提供 workspace 裡的報告、截圖、檢視器（圖片與分頁無法帶標頭，所以 token 放網址）"""
+        """唯讀提供目前專案 workspace 裡的報告、截圖、檢視器（圖片與分頁無法帶標頭，所以 token 放網址）"""
         if not self._guard(token_in_query=True):
             return
-        p = (WS / rel).resolve()
-        if not inside(p, WS) or not p.is_file() or p.suffix not in ('.png', '.md', '.json', '.html'):
+        try:
+            ws = ws_dir()
+        except ValueError:
+            return self._send(404, {'error': '找不到'})
+        p = (ws / rel).resolve()
+        if not inside(p, ws) or not p.is_file() or p.suffix not in ('.png', '.md', '.json', '.html'):
             return self._send(404, {'error': '找不到'})
         ctype = {'.md': 'text/plain; charset=utf-8', '.json': 'application/json; charset=utf-8',
                  '.html': 'text/html; charset=utf-8'}.get(p.suffix) or mimetypes.guess_type(p.name)[0] or 'application/octet-stream'
@@ -437,8 +494,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(404, {'error': '找不到'})
         d = models_dir() / parts[0]
         try:
-            import orchestrator as O
-            use, skip = O.ref_images(d)
+            use, skip = orch().ref_images(d)
         except Exception as e:
             return self._send(400, {'error': f'讀取設定失敗：{e}'})
         if parts[1] not in [p.name for p in use] + [f for f, _ in skip]:
@@ -469,7 +525,7 @@ class H(BaseHTTPRequestHandler):
                 c = b.get('config')
                 if not isinstance(c, dict):
                     raise ValueError('設定格式錯誤')
-                write_text(ROOT / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
+                write_text(pdir() / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
                 return self._send(200, {'saved': True})
             if u.path == '/api/cmd':
                 return self._send(200, do_cmd(b))
@@ -477,6 +533,16 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {'stopped': stop_job()})
             if u.path == '/api/newmodel':
                 return self._send(200, new_model(b))
+            if u.path in ('/api/project/use', '/api/project/new'):
+                # 工作在跑的時候換專案，畫面會跟正在跑的工作對不上；等它結束再換
+                if job_running():
+                    raise RuntimeError('有工作正在跑，等它結束再切換或新增專案')
+                O = orch()
+                if u.path == '/api/project/use':
+                    O.use_project(str(b.get('name') or ''))
+                    return self._send(200, {'project': b.get('name')})
+                p, (git_ok, git_out) = O.new_project(str(b.get('name') or '').strip(), str(b.get('game') or 'game').strip())
+                return self._send(200, {'project': p.name, 'git_ok': git_ok, 'git_output': git_out[-300:]})
             self._send(404, {'error': '沒有這個路徑'})
         except Exception as e:
             self._send(400, {'error': str(e)})
@@ -501,11 +567,15 @@ def main():
     url = f'http://127.0.0.1:{port}/'
     print(f'介面已啟動：{url}\n關閉介面：在這個視窗按 Ctrl+C', flush=True)
     try:
-        import orchestrator as O                  # 匯入時會從 templates/ 補齊你的檔案（設定、任務、清單…）
-        if O.CREATED:
-            print('第一次使用：已從 templates/ 建立你的檔案：' + '、'.join(O.CREATED), flush=True)
+        O = orch()                                # 切到目前專案時，會從 templates/ 補上專案缺的檔案
+        if not O.current_project():
+            print('還沒有專案：請在介面上方按「新增專案」', flush=True)
+        else:
+            print(f'目前專案：{O.current_project()}', flush=True)
+            if O.CREATED:
+                print('已從 templates/ 補上這個專案缺的檔案：' + '、'.join(O.CREATED), flush=True)
     except Exception as e:
-        print(f'讀取設定失敗（flow.config.json 格式錯誤？）：{e}', flush=True)
+        print(f'讀取專案設定失敗（flow.config.json 格式錯誤？）：{e}', flush=True)
     if not a.no_browser:
         webbrowser.open(url)
     try:
