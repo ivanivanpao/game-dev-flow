@@ -6,23 +6,27 @@
 game-dev-flow/
 ├── README.md
 ├── docs/                       ← 說明文件
-├── flow.config.json            ← 設定
+├── templates/                  ← 你的檔案的範本（flow.config.json、TASK.md、prompt.md、human-feedback.md、checks/）
+│                                  第一次執行時複製成下面標「你的」的檔案；設定也拿它當預設值，你的設定少了哪項就用這裡的
+├── flow.config.json            ← 設定（你的）
 ├── orchestrator.py             ← 協調器（所有指令的入口）
 ├── gui.bat                     ← 雙擊啟動圖形化介面
 ├── gui/                        ← 圖形化介面（server.py 本機伺服器、index.html 網頁）
 ├── package.json                ← 模型檢視器需要 three 與 esbuild（根目錄 npm install）
 ├── requirements.txt            ← Python 套件（playwright）
 ├── tests/                      ← 工具本身的自動測試（run_tests.py、假的 claude：fake_claude.py）
-├── prompt.md / TASK.md / human-feedback.md   ← 遊戲階段：設計文件／本輪任務／你的意見
+├── prompt.md / TASK.md / human-feedback.md   ← 遊戲階段：設計文件／本輪任務／你的意見（你的）
 ├── lab/                        ← 模型檢視器（WebGPU；lab.js、lab.template.html、build_lab.mjs）
 ├── gates/
 │   ├── model_gate.py           ← 模型關卡（幾何檢查＋多角度截圖）
 │   ├── browser_gate.py         ← 遊戲關卡（抓錯誤／截圖／幀時間）
 │   └── guard.py                ← 改檔守門員（hook）：AI 開發者改不該改的檔案時，在改之前就擋下
-├── agents/                     ← 各 agent 的指令
+├── agents/                     ← 各 agent 的指令（工具內建，隨更新換新；介面上只能看）
 │   ├── model-dev.md、reviewer-model-visual.md      ← 模型工坊用
 │   └── dev.md、reviewer-visual.md、reviewer-code.md ← 遊戲整合用
-├── checks/
+├── agents.local/               ← （選用，你的）客製的 agent 指令：放同名檔案就取代 agents/ 裡的那份；
+│                                  代價是工具更新那份指令時，你的不會跟著更新
+├── checks/                     ← （你的）
 │   ├── model-checklist.md      ← 所有模型共通的驗收清單
 │   └── visual-checklist.md     ← 遊戲的累積式驗收清單
 ├── models/                     ← 不進這個工具的版控（.gitignore）

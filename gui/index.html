@@ -132,7 +132,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
   <!-- 進階 -->
   <section id="advanced">
-    <p class="help">這些是流程本身的檔案。通常不用改；想調整 AI 角色的行為或規則時才改。</p>
+    <p class="help">這些是流程本身的檔案。通常不用改。AI 角色指令（agents/）是工具內建的、只能看；想調整某個角色，把它複製到 <code>agents.local/</code> 同名檔案，就會出現在這裡讓你改。</p>
     <div class="card"><div id="a-editor"></div></div>
   </section>
 </main>
@@ -219,7 +219,8 @@ const HELP = {
 function helpFor(path) {
   const base = path.split('/').pop();
   if (path.startsWith('models/') && base === 'human-feedback.md') return HELP['model-human-feedback.md'];
-  if (path.startsWith('agents/')) return 'AI 角色的工作指令。協調器每次呼叫這個角色時，會把這份檔案交給它。';
+  if (path.startsWith('agents/')) return 'AI 角色的工作指令（工具內建，會隨工具更新，所以只能看）。想客製：把這份複製到 agents.local/ 同名檔案再改，協調器會優先用你的。';
+  if (path.startsWith('agents.local/')) return '你客製的 AI 角色指令，協調器會用這份取代 agents/ 裡的同名檔案。注意：工具更新 agents/ 時，你這份不會跟著更新。';
   return HELP[path] || HELP[base] || '';
 }
 
@@ -569,7 +570,8 @@ async function saveSettings() {
 // ---------- 進階 ----------
 async function buildAdvanced() {
   const l = await api('/api/lists');
-  const files = [...l.agents.map(n => ({label: 'agents/' + n, path: 'agents/' + n})),
+  const files = [...l.agents.map(n => ({label: 'agents/' + n + (l.agents_local.includes(n) ? '（已被客製版取代）' : '（唯讀）'), path: 'agents/' + n})),
+    ...l.agents_local.map(n => ({label: 'agents.local/' + n + '（你的客製版）', path: 'agents.local/' + n})),
     ...l.checks.filter(n => n !== 'visual-checklist.md').map(n => ({label: 'checks/' + n, path: 'checks/' + n})),
     {label: 'flow.config.json（原始檔）', path: 'flow.config.json'}];
   $('a-editor').setAttribute('data-ed', ''); editor($('a-editor'), files);

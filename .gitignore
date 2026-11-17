@@ -7,3 +7,10 @@ dist/
 .claude-tmp/
 game/
 models/
+# 你自己的檔案：第一次執行時從 templates/ 建立，更新工具不會動到
+/flow.config.json
+/TASK.md
+/prompt.md
+/human-feedback.md
+/checks/
+/agents.local/

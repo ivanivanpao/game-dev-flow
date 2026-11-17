@@ -23,7 +23,44 @@ import argparse, datetime, difflib, hashlib, json, os, re, shutil, subprocess, s
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-CFG = json.loads((ROOT / 'flow.config.json').read_text('utf-8'))
+TEMPLATES = ROOT / 'templates'
+# 使用者自己的檔案：不進工具的版控，更新工具不會動到。不存在時從 templates/ 的同名範本建立
+USER_FILES = ('flow.config.json', 'TASK.md', 'prompt.md', 'human-feedback.md', 'checks/visual-checklist.md', 'checks/model-checklist.md')
+
+
+def ensure_user_files():
+    """使用者的檔案不存在就從範本複製一份；已經存在的絕不覆蓋。回傳這次新建的檔案（相對路徑）"""
+    created = []
+    for rel_path in USER_FILES:
+        dst, src = ROOT / rel_path, TEMPLATES / rel_path
+        if not dst.exists() and src.exists():
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst); created.append(rel_path)
+    return created
+
+
+def merge_config(base, over):
+    """設定合併：over 有的項目蓋過 base，dict 逐層合併。工具新增的設定項目，你舊的設定檔沒有也會用範本的預設值"""
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = merge_config(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def load_config():
+    """實際使用的設定 = templates/flow.config.json（預設值）＋ flow.config.json（你的設定）"""
+    base = json.loads((TEMPLATES / 'flow.config.json').read_text('utf-8')) if (TEMPLATES / 'flow.config.json').exists() else {}
+    return merge_config(base, json.loads((ROOT / 'flow.config.json').read_text('utf-8')))
+
+
+def agent_md(name):
+    """AI 角色說明：agents.local/ 有同名檔案就用你的客製版，否則用工具內建的 agents/"""
+    local = ROOT / 'agents.local' / name
+    return read(local) if local.exists() else read(ROOT / 'agents' / name)
+
+
+CREATED = ensure_user_files()
+CFG = load_config()
 PROJECT = (ROOT / CFG['project_dir']).resolve()
 MODELS = (ROOT / CFG.get('models_dir', 'models')).resolve()
 RELEASED = MODELS / '_released'
@@ -335,7 +372,7 @@ def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot, 
             (sandbox / 'ref').mkdir()
             for p in refs:
                 shutil.copy(p, sandbox / 'ref' / p.name)
-        prompt = (read(ROOT / 'agents' / role_md) + '\n\n---\n你的工作資料夾裡有這些文字檔：' + '、'.join(names) +
+        prompt = (agent_md(role_md) + '\n\n---\n你的工作資料夾裡有這些文字檔：' + '、'.join(names) +
                   '\n以及這些截圖：\n' + '\n'.join('- ' + s['file'] for s in shots) +
                   (('\n以及人類提供的參考圖（不是截圖，是「應該長這樣」的參考）：\n' + '\n'.join('- ref/' + p.name for p in refs)) if refs else '') +
                   '\n請用 Read 工具逐一開啟每一個檔案（圖片與文字都要看），然後依格式輸出。')
@@ -351,7 +388,7 @@ def code_review(diff, task_text, cwd, dry, slot):
     cut = ''
     if len(diff) > limit:                      # 太長要截斷時，明確告訴審查者後面還有內容，不要讓它以為已經看完
         cut = f'\n（注意：diff 太長，以上只顯示前 {limit} 字，後面省略了 {len(diff) - limit} 字。需要的話請用 Read 工具開啟完整檔案。）\n'
-    prompt = (read(ROOT / 'agents' / 'reviewer-code.md') + '\n\n---\n# 本次任務與完成標準\n' + task_text +
+    prompt = (agent_md('reviewer-code.md') + '\n\n---\n# 本次任務與完成標準\n' + task_text +
               '\n\n# 本輪程式碼差異（diff）\n```diff\n' + diff[:limit] + '\n```\n' + cut)
     return review_agent('code', prompt, cwd, 'Read,Grep,Glob', ['Read', 'Grep', 'Glob'], dry, slot)
 
@@ -460,7 +497,7 @@ def cmd_model(args):
                     '\n請先用 Read 工具逐一開啟來看。參考圖用來對照整體輪廓、比例與配色；跟 spec.md 衝突時以 spec.md 為準。') if refs else ''
 
         log('模型開發者工作中…')
-        prompt = (read(ROOT / 'agents' / 'model-dev.md') + f'\n\n---\n# 模型名稱\n{name}\n\n# spec.md（模型規格）\n' + read(d / 'spec.md') +
+        prompt = (agent_md('model-dev.md') + f'\n\n---\n# 模型名稱\n{name}\n\n# spec.md（模型規格）\n' + read(d / 'spec.md') +
                   '\n\n# spec.json（客觀檢查條件與截圖角度）\n```json\n' + read(d / 'spec.json') + '\n```\n\n# 驗收清單\n' + cl() + ref_text +
                   '\n\n# 目前的 model.js\n```js\n' + (before or '（還沒有，請從頭建立）') + '\n```\n\n---\n# 上一輪回饋\n' + (feedback or '（第 1 輪，沒有回饋）') +
                   '\n\n---\n# 人類意見\n' + human + f'\n\n現在是第 {rnd} 輪（最多 {rounds} 輪）。')
@@ -838,7 +875,7 @@ def cmd_run(args):
             before = git_ok('rev-parse', 'HEAD')
 
             log('開發者工作中…')
-            dev_prompt = (read(ROOT / 'agents' / 'dev.md') + '\n\n---\n# TASK.md\n' + read(ROOT / 'TASK.md') +
+            dev_prompt = (agent_md('dev.md') + '\n\n---\n# TASK.md\n' + read(ROOT / 'TASK.md') +
                           '\n\n---\n# prompt.md（設計文件）\n' + read(ROOT / 'prompt.md') +
                           '\n\n---\n# 可用的已發布模型（只能用，不能改）\n' + models_context() +
                           f"\n\n---\n# 專案建置指令\n{CFG['build_cmd']}\n\n---\n# 上一輪回饋\n" + (feedback or '（第 1 輪，沒有回饋）') +
@@ -1039,6 +1076,8 @@ def main():
     sub.add_parser('gates')
     c = sub.add_parser('add-check'); c.add_argument('text'); c.add_argument('--model')
     a = ap.parse_args()
+    if CREATED:
+        log('第一次使用：已從 templates/ 建立你的檔案：' + '、'.join(CREATED) + '（之後更新工具不會動到它們）')
     sys.exit({'model': cmd_model, 'lab': cmd_lab, 'release': cmd_release, 'unrelease': cmd_unrelease, 'status': cmd_status,
               'run': cmd_run, 'gates': cmd_gates, 'add-check': cmd_add_check}[a.cmd](a) or 0)
 

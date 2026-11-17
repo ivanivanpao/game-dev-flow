@@ -41,9 +41,10 @@ def g(*a):
 
 # ---------- 建副本 ----------
 rm(SB); SB.mkdir(parents=True)
-for f in ('orchestrator.py', 'package.json', 'TASK.md', 'prompt.md', 'human-feedback.md'):
+# 只複製工具本身（版控裡有的東西）；你的檔案（設定、任務、清單）由協調器第一次執行時從 templates/ 建立，跟別人剛下載工具時一樣
+for f in ('orchestrator.py', 'package.json'):
     shutil.copy(REAL / f, SB / f)
-for d in ('gates', 'lab', 'agents', 'checks', 'gui', 'node_modules'):
+for d in ('gates', 'lab', 'agents', 'templates', 'gui', 'node_modules'):
     shutil.copytree(REAL / d, SB / d)
 (SB / 'models' / '_released').mkdir(parents=True)
 (SB / 'models' / 'axe').mkdir()
@@ -88,7 +89,10 @@ game = SB / 'game'; game.mkdir()
     'shots': [{'name': '01', 'wait_ms': 50, 'describe': '畫面'}]}), 'utf-8')
 (game / '.gitignore').write_text('dist/\n', 'utf-8')
 g('init', '-b', 'main'); g('add', '-A'); g('commit', '-m', 'init')
-cfg = json.loads((REAL / 'flow.config.json').read_text('utf-8'))
+TPL_CFG = json.loads((REAL / 'templates' / 'flow.config.json').read_text('utf-8'))
+cfg = json.loads(json.dumps(TPL_CFG))
+del cfg['model_viewport']                 # 故意少一項、巢狀的也少一項：要靠範本的預設值補上
+del cfg['models']['model_code']
 cfg.update({'project_dir': 'game', 'build_cmd': 'node build.js', 'entry': 'dist/index.html', 'shots_spec': 'game/shots.json',
             'claude_bin': str(fake / 'claude.cmd'), 'require_webgpu': False, 'uses_models': [], 'stall_rounds': 2,
             'perf': {'target_avg_ms': None, 'target_p95_ms': None}, 'agent_timeout_sec': 120})
@@ -167,6 +171,23 @@ check('#12 遊戲開發者：改驗收清單 → 擋下', guard(grule, {'file_pa
 check('#12 遊戲開發者：NotebookEdit 也會檢查', guard(grule, {'notebook_path': str(SB / 'checks' / 'x.ipynb')}, tool='NotebookEdit')[0] == 2)
 check('#12 沒有規則 → 擋下（拿不準就不放行）', guard(None, {'file_path': str(SB / 'game' / 'a.js')})[0] == 2)
 check('#12 讀不懂輸入 → 擋下', guard(grule, None, raw='不是 JSON')[0] == 2)
+
+# #14 你的檔案從範本建立、設定用範本當預設值、角色說明可用 agents.local/ 客製
+check('#14 第一次執行：從 templates/ 建立你的檔案，內容跟範本一樣',
+      sorted(O.CREATED) == sorted(set(O.USER_FILES) - {'flow.config.json'})
+      and all((SB / f).read_bytes() == (SB / 'templates' / f).read_bytes() for f in O.CREATED), O.CREATED)
+(SB / 'TASK.md').write_text('# 我的任務', 'utf-8')
+check('#14 已經存在的檔案不會被範本覆蓋', O.ensure_user_files() == [] and (SB / 'TASK.md').read_text('utf-8') == '# 我的任務')
+shutil.copyfile(SB / 'templates' / 'TASK.md', SB / 'TASK.md')
+check('#14 設定少了某項 → 用範本的預設值補上（含巢狀項目）',
+      O.CFG['model_viewport'] == TPL_CFG['model_viewport'] and 'model_code' in O.CFG['models'] and O.CFG['claude_bin'] == cfg['claude_bin'], O.CFG)
+check('#14 設定合併：你的值蓋過預設值，dict 逐層合併',
+      O.merge_config({'a': 1, 'm': {'x': 1, 'y': 2}, 'l': [1]}, {'m': {'y': 3}, 'b': 2, 'l': []}) == {'a': 1, 'm': {'x': 1, 'y': 3}, 'b': 2, 'l': []})
+(SB / 'agents.local').mkdir()
+(SB / 'agents.local' / 'reviewer-code.md').write_text('# 我的程式審查者', 'utf-8')
+check('#14 agents.local/ 有同名檔案 → 用你的客製版', O.agent_md('reviewer-code.md') == '# 我的程式審查者')
+check('#14 agents.local/ 沒有 → 用工具內建的 agents/', O.agent_md('dev.md') == (SB / 'agents' / 'dev.md').read_text('utf-8'))
+rm(SB / 'agents.local')
 
 # #13 參考圖：挑哪些檔案、超過張數或大小就略過、換圖指紋會變
 rd = TMP / 'refs'; rd.mkdir()
@@ -354,6 +375,26 @@ try:
     check('#13 介面拿得到參考圖（image/png）', http_status('/ref/refcar/ref.png') == (200, 'image/png'), http_status('/ref/refcar/ref.png'))
     check('#13 介面拿不到模型資料夾裡的其他檔案', http_status('/ref/refcar/spec.md')[0] == 404 and http_status('/ref/refcar/..%2Fbox%2Fmodel.js')[0] == 404)
     check('#13 沒帶 token 拿不到參考圖', http_status('/ref/refcar/ref.png', token_q=False)[0] == 403)
+
+    def api(path, body=None):
+        req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', headers={'X-Token': token, 'Content-Type': 'application/json'},
+                                     data=json.dumps(body).encode('utf-8') if body is not None else None)
+        try:
+            r = urllib.request.urlopen(req)
+            return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    code_, f_ = api('/api/file?path=agents/dev.md')
+    check('#14 介面看得到工具內建的 agents/，但標示不能寫', code_ == 200 and f_['writable'] is False, (code_, f_))
+    dev_before = (SB / 'agents' / 'dev.md').read_text('utf-8')
+    check('#14 介面改不了工具內建的 agents/', api('/api/file', {'path': 'agents/dev.md', 'content': 'x'})[0] == 403
+          and (SB / 'agents' / 'dev.md').read_text('utf-8') == dev_before)
+    code_, _ = api('/api/file', {'path': 'agents.local/dev.md', 'content': '# 我的開發者'})
+    check('#14 介面可以寫 agents.local/ 的客製版，並列在清單裡',
+          code_ == 200 and (SB / 'agents.local' / 'dev.md').read_text('utf-8') == '# 我的開發者' and api('/api/lists')[1]['agents_local'] == ['dev.md'])
+    code_, c_ = api('/api/config')
+    check('#14 介面的設定頁拿到的是合併後的設定（少的項目有預設值）', code_ == 200 and c_.get('model_viewport') == TPL_CFG['model_viewport'], c_)
+    rm(SB / 'agents.local')
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         br = p.chromium.launch(headless=True, channel='chromium', args=['--enable-unsafe-webgpu'])
@@ -370,11 +411,16 @@ finally:
     srv.terminate(); srv.wait()
 
 # ---------- 重新下載專案（沒有 models/ 資料夾）時，status 不會當掉 ----------
+# 剛 clone 下來：只有工具本身，沒有 models/、也沒有你的設定、任務、清單
 fresh = TMP / 'fresh'; fresh.mkdir()
 shutil.copy(REAL / 'orchestrator.py', fresh / 'orchestrator.py')
-shutil.copy(SB / 'flow.config.json', fresh / 'flow.config.json')
+shutil.copytree(REAL / 'templates', fresh / 'templates')
 r = subprocess.run([PY, str(fresh / 'orchestrator.py'), 'status'], cwd=fresh, capture_output=True, text=True, encoding='utf-8', errors='replace', env=ENV)
 check('沒有 models/ 資料夾時 status 不會當掉，並自動建立 models/_released/', r.returncode == 0 and (fresh / 'models' / '_released').is_dir(), r.stdout + r.stderr)
+check('#14 剛下載：設定、任務、清單全部從範本建立，並告訴你建了哪些',
+      all((fresh / f).read_bytes() == (REAL / 'templates' / f).read_bytes() for f in O.USER_FILES) and '第一次使用' in r.stdout, r.stdout + r.stderr)
+r = subprocess.run([PY, str(fresh / 'orchestrator.py'), 'status'], cwd=fresh, capture_output=True, text=True, encoding='utf-8', errors='replace', env=ENV)
+check('#14 第二次執行不會再建立、也不會再提示', '第一次使用' not in r.stdout, r.stdout)
 
 failed = sum(not ok for _, ok in results)
 print(f"\n共 {len(results)} 項，通過 {len(results) - failed} 項，失敗 {failed} 項")

@@ -9,7 +9,8 @@
   - 只綁定 127.0.0.1，區網其他電腦連不進來
   - 檢查 Host 標頭，擋掉 DNS rebinding（惡意網站把自己的網域指到 127.0.0.1）
   - 每次啟動產生一組隨機 token，嵌在頁面裡；所有 API 都要帶 token，其他網站的頁面拿不到它
-  - 只能讀寫白名單內的檔案（你該寫的規格、任務、清單、設定）；model.js 等 AI 管的檔案只能看
+  - 只能讀寫白名單內的檔案（你該寫的規格、任務、清單、設定、agents.local/ 的客製角色說明）；
+    model.js 等 AI 管的檔案、工具內建的 agents/ 只能看
   - 按鈕只會執行 orchestrator.py 的既有指令，參數都經過檢查。
     但設定檔裡的 build_cmd、extra_checks、notify_cmd 本來就是「會被執行的指令」，能改設定就等於能決定執行什麼
   - workspace 裡的 HTML（模型檢視器，裡面是 AI 寫的程式）加上 sandbox 隔離，碰不到這個介面的 API
@@ -32,7 +33,9 @@ ALLOWED_HOSTS = set()                                          # 啟動後依實
 
 # ---------- 設定與路徑 ----------
 def cfg():
-    return json.loads((ROOT / 'flow.config.json').read_text('utf-8'))
+    """實際使用的設定（範本預設值＋你的設定），跟協調器讀到的一樣"""
+    import orchestrator as O
+    return O.load_config()
 
 
 def models_dir():
@@ -79,11 +82,12 @@ def resolve_file(rel, write=False):
     parts = rel.split('/')
     ok_write = (
         rel in ('prompt.md', 'TASK.md', 'human-feedback.md', 'flow.config.json')
-        or (len(parts) == 2 and parts[0] in ('checks', 'agents') and parts[1].endswith('.md'))
+        or (len(parts) == 2 and parts[0] in ('checks', 'agents.local') and parts[1].endswith('.md'))
         or (len(parts) == 3 and parts[0] == 'models' and NAME_RE.match(parts[1]) and parts[2] in MODEL_EDITABLE)
         or (shots_spec_path() is not None and p == shots_spec_path())
     )
-    ok_read = ok_write or (len(parts) == 3 and parts[0] == 'models' and NAME_RE.match(parts[1]) and parts[2] in MODEL_READONLY)
+    ok_read = (ok_write or (len(parts) == 3 and parts[0] == 'models' and NAME_RE.match(parts[1]) and parts[2] in MODEL_READONLY)
+               or (len(parts) == 2 and parts[0] == 'agents' and parts[1].endswith('.md')))     # 工具內建的角色說明：只能看，客製請放 agents.local/
     if write:
         return p if ok_write else None
     return p if ok_read else None
@@ -401,6 +405,7 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, run_files(q.get('id', '')))
             if u.path == '/api/lists':
                 return self._send(200, {'agents': sorted(p.name for p in (ROOT / 'agents').glob('*.md')),
+                                        'agents_local': sorted(p.name for p in (ROOT / 'agents.local').glob('*.md')),
                                         'checks': sorted(p.name for p in (ROOT / 'checks').glob('*.md'))})
             self._send(404, {'error': '沒有這個路徑'})
         except Exception as e:
@@ -495,6 +500,12 @@ def main():
     ALLOWED_HOSTS.update({f'127.0.0.1:{port}', f'localhost:{port}'})
     url = f'http://127.0.0.1:{port}/'
     print(f'介面已啟動：{url}\n關閉介面：在這個視窗按 Ctrl+C', flush=True)
+    try:
+        import orchestrator as O                  # 匯入時會從 templates/ 補齊你的檔案（設定、任務、清單…）
+        if O.CREATED:
+            print('第一次使用：已從 templates/ 建立你的檔案：' + '、'.join(O.CREATED), flush=True)
+    except Exception as e:
+        print(f'讀取設定失敗（flow.config.json 格式錯誤？）：{e}', flush=True)
     if not a.no_browser:
         webbrowser.open(url)
     try:
