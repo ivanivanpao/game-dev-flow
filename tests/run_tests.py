@@ -77,6 +77,14 @@ shutil.copy(SB / 'models' / 'box' / 'model.js', SB / 'models' / 'refcar' / 'mode
     'views': [{'name': '1-iso', 'dir': [1, 0.6, 1], 'dist': 'fit', 'describe': '車'}]}), 'utf-8')
 (SB / 'models' / 'refcar' / 'checklist.md').write_text('# 清單', 'utf-8')
 (SB / 'models' / 'refcar' / 'ref.png').write_bytes(png1x1())
+# 實際比例的大模型（約 300×180 公尺的平板，像一條賽道）：地板要跟著放大
+(SB / 'models' / 'bigtrack').mkdir()
+(SB / 'models' / 'bigtrack' / 'model.js').write_text(
+    "export const meta = { name: 'bigtrack' };\nexport function build(THREE) { const g = new THREE.Group();\n"
+    "g.add(new THREE.Mesh(new THREE.BoxGeometry(300, 0.5, 180), new THREE.MeshStandardMaterial({ color: 0x556677 }))); return g; }\n", 'utf-8')
+(SB / 'models' / 'bigtrack' / 'spec.md').write_text('# 賽道', 'utf-8')
+(SB / 'models' / 'bigtrack' / 'spec.json').write_text(json.dumps({'name': 'bigtrack', 'checks': {},
+    'views': [{'name': '1-top', 'dir': [0, 1, 0], 'up': [0, 0, -1], 'dist': 'fit', 'describe': '賽道'}]}), 'utf-8')
 # 假的 claude
 fake = SB / 'fake'; fake.mkdir()
 shutil.copy(Path(__file__).resolve().parent / 'fake_claude.py', fake / 'fake_claude.py')
@@ -345,6 +353,36 @@ check('#13 有參考圖 → 開發者的提示詞列出 ref.png 並要它用 Rea
 check('#13 參考圖放進審查者隔離資料夾的 ref/，截圖照常在', visc and 'ref/ref.png' in visc[0]['files'] and '1-iso.png' in visc[0]['files'], visc[0]['files'] if visc else out[-800:])
 check('#13 審查者的提示詞把參考圖和截圖分開列出', visc and '- ref/ref.png' in visc[0]['prompt'] and '參考圖' in visc[0]['prompt'], visc[0]['prompt'][-600:] if visc else '')
 check('#13 開發者看過參考圖後，參考圖沒被動到', (SB / 'models' / 'refcar' / 'ref.png').read_bytes() == png1x1())
+rstats = json.loads((sorted((SB / 'workspace').glob('model-refcar-*'))[-1] / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))['stats']
+check('#15 小模型：地板維持每格 1 公尺', rstats and rstats.get('grid_cell') == 1, rstats)
+check('#15 審查者的 shots.md 開頭寫明地板每格幾公尺', visc and '地板方格每格 1 公尺' in (visc[0]['shots_md'] or ''), visc[0]['shots_md'] if visc else '')
+
+# 實際比例的大模型（300×180 公尺）：地板放大、每格 10 公尺，截圖沒被遠裁切面切掉
+LOG.unlink(missing_ok=True)
+rc, out = orch('model', 'bigtrack', '--rounds', '1')
+bres = json.loads((sorted((SB / 'workspace').glob('model-bigtrack-*'))[-1] / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))
+check('#15 大模型：地板改成每格 10 公尺', bres['stats'] and bres['stats'].get('grid_cell') == 10, bres)
+visc = [c for c in (json.loads(l) for l in LOG.read_text('utf-8').splitlines()) if c['tools'] == 'Read']
+check('#15 大模型：審查者被告知每格 10 公尺', visc and '地板方格每格 10 公尺' in (visc[0]['shots_md'] or ''), visc[0]['shots_md'] if visc else out[-600:])
+def non_bg_ratio(png):
+    """截圖裡「跟背景色明顯不同」的像素比例（用瀏覽器解 PNG，不另外裝影像套件）"""
+    import base64
+    from playwright.sync_api import sync_playwright
+    url = 'data:image/png;base64,' + base64.b64encode(Path(png).read_bytes()).decode()
+    with sync_playwright() as p:
+        br = p.chromium.launch(headless=True)
+        r = br.new_page().evaluate("""(url) => new Promise((ok) => { const im = new Image(); im.onload = () => {
+            const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+            const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data;
+            let n = 0; for (let i = 0; i < d.length; i += 4)
+              if (Math.max(Math.abs(d[i] - 0xb9), Math.abs(d[i + 1] - 0xc2), Math.abs(d[i + 2] - 0xcc)) > 30) n++;
+            ok(n / (c.width * c.height)); }; im.src = url; })""", url)
+        br.close()
+    return r
+
+
+ratio = non_bg_ratio(sorted((SB / 'workspace').glob('model-bigtrack-*'))[-1] / 'shots' / 'r01' / '1-top.png')
+check('#15 大模型：俯視截圖拍得到賽道（不是只有背景色）', ratio > 0.2, ratio)
 
 # ---------- GUI：檢視器頁面隔離 ----------
 lab = SB / 'workspace' / 'lab'; lab.mkdir(parents=True, exist_ok=True)

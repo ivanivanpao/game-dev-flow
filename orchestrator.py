@@ -354,12 +354,13 @@ def review_agent(role, prompt, cwd, tools, allowed, dry, slot):
     return run_agent(role, retry, cwd, tools, allowed, CFG['agent_timeout_sec'], dry, slot)
 
 
-def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot, refs=()):
+def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot, refs=(), note=''):
     """視覺審查者：在系統暫存區的隔離資料夾裡，只放截圖、說明文字與清單（沒有程式碼、沒有開發者自評）。
-    refs：人類提供的參考圖，放進子資料夾 ref/，跟截圖分開，檔名也不會撞到截圖"""
+    refs：人類提供的參考圖，放進子資料夾 ref/，跟截圖分開，檔名也不會撞到截圖
+    note：截圖環境的補充說明，寫在 shots.md 開頭（例如模型檢視器的地板每格幾公尺）"""
     sandbox = Path(tempfile.mkdtemp(prefix='flow-visual-'))
     try:
-        lines = ['# 每張截圖應該呈現什麼', '']
+        lines = ['# 每張截圖應該呈現什麼', ''] + ([note, ''] if note else [])
         for s in shots:
             shutil.copy(Path(shots_dir) / s['file'], sandbox / s['file'])
             lines += [f"## {s['file']}", s['describe'], '']
@@ -529,7 +530,8 @@ def cmd_model(args):
                 if CFG.get('model_reviewers', {}).get('visual', True):
                     log('視覺審查者（只看截圖）…')
                     vis_out = visual_review('reviewer-model-visual.md', ws / 'shots' / f'r{rnd:02d}', g['shots'],
-                                            {'spec.md': read(d / 'spec.md')}, cl(), dry, 'model_visual', refs)
+                                            {'spec.md': read(d / 'spec.md')}, cl(), dry, 'model_visual', refs,
+                                            f"截圖環境：地板方格每格 {g['stats'].get('grid_cell', 1)} 公尺（依模型大小調整）。")
                     (ws / 'messages' / f'r{rnd:02d}-review-visual.md').write_text(vis_out, 'utf-8')
                     entry['visual'] = verdict(vis_out)
                 if CFG.get('model_reviewers', {}).get('code', False):

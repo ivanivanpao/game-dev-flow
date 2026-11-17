@@ -38,9 +38,8 @@ async function main() {
   const key = new THREE.DirectionalLight(0xffffff, 2.0); key.position.set(3, 5, 4); scene.add(key);
   const fill = new THREE.DirectionalLight(0xdfe8ff, 0.8); fill.position.set(-4, 2, -3); scene.add(fill);
 
-  // 參考物：1 公尺方格地板（看尺寸）、原點座標軸（紅 x、綠 y、藍 z，看座標約定）、1.8 公尺高的人形（看比例）
+  // 參考物：方格地板（看尺寸，大小跟著模型，見下方 groundGrid）、原點座標軸（紅 x、綠 y、藍 z，看座標約定）、1.8 公尺高的人形（看比例）
   const GROUND_Y = -0.9;
-  const grid = new THREE.GridHelper(10, 10, 0x55606b, 0x8b96a1); grid.position.y = GROUND_Y; scene.add(grid);
   const axes = new THREE.AxesHelper(0.35); scene.add(axes);
   const human = new THREE.Group();
   const hm = new THREE.MeshStandardMaterial({ color: 0x6d7782, roughness: 1, transparent: true, opacity: 0.55 });
@@ -59,6 +58,21 @@ async function main() {
   }
   const bboxHelper = new THREE.Box3Helper(visibleBox().clone(), 0xffa733); scene.add(bboxHelper);
 
+  // 方格地板跟著模型大小：以原點為中心、蓋住整個模型，至少 10 公尺見方。
+  // 每格 1、10、100… 公尺，格數保持在 10～100 格；小模型就是原本的 10 公尺、每格 1 公尺
+  function groundGrid(b) {
+    const xs = [b.min.x, b.max.x, b.min.z, b.max.z];
+    const extent = !b.isEmpty() && xs.every(Number.isFinite) ? Math.max(...xs.map(Math.abs)) : 0;
+    const span = 2 * Math.max(5, extent * 1.2);                          // 留 20% 邊，模型不會剛好壓在地板邊緣
+    const cell = 10 ** Math.floor(Math.log10(span / 10));
+    const n = Math.ceil(span / cell - 1e-9);                             // 格數（扣掉浮點誤差，10 公尺就是 10 格）
+    return { cell, n };
+  }
+  const { cell: gridCell, n: gridN } = groundGrid(visibleBox());
+  const grid = new THREE.GridHelper(gridN * gridCell, gridN, 0x55606b, 0x8b96a1); grid.position.y = GROUND_Y; scene.add(grid);
+  const gridEl = document.getElementById('gr');
+  if (gridEl) gridEl.textContent = gridCell;
+
   function stats() {
     const b = visibleBox(), size = b.getSize(new THREE.Vector3());
     let tris = 0, meshes = 0, nan = 0, hidden = 0; const mats = new Set();
@@ -72,7 +86,8 @@ async function main() {
     });
     const r = v => +v.toFixed(4);
     return { size: [r(size.x), r(size.y), r(size.z)], bbox_min: [r(b.min.x), r(b.min.y), r(b.min.z)], bbox_max: [r(b.max.x), r(b.max.y), r(b.max.z)],
-             triangles: Math.round(tris), meshes, materials: mats.size, hidden_meshes: hidden, nan_meshes: nan, meta: MODEL.meta };
+             triangles: Math.round(tris), meshes, materials: mats.size, hidden_meshes: hidden, nan_meshes: nan, meta: MODEL.meta,
+             grid_cell: gridCell };                                     // 地板每格幾公尺（給審查者看截圖時換算尺寸）
   }
 
   function setView(v) {

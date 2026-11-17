@@ -95,7 +95,7 @@ git pull
 
 ## 目前狀態
 
-- 還沒用真的 Claude 實跑過；流程邏輯已用假的 claude 測過（`tests/run_tests.py`，89 項）。第一次實跑請先 `--rounds 1`。
+- 還沒用真的 Claude 實跑過；流程邏輯已用假的 claude 測過（`tests/run_tests.py`，94 項）。第一次實跑請先 `--rounds 1`。
 - 專案裡沒有範例模型與範例遊戲，要從「新增模型」和你自己的遊戲開始。
 - 審查者是 AI，會漏看；最後一關一定是你親自看、親自玩。
 
