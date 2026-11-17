@@ -32,6 +32,7 @@ game-dev-flow/
 │   │     spec.json             ←   客觀檢查條件＋截圖角度（範本預設 4 個角度）
 │   │     checklist.md          ←   這個模型專屬的累積清單
 │   │     human-feedback.md     ←   你對這個模型的意見（第一次在介面編輯時才建立）
+│   │     ref*.png／jpg／webp    ←   （選填）參考圖：開發者與視覺審查者每輪都會看；最多 4 張、每張 5MB 以內
 │   │     reopen.md             ←   （遊戲階段退件時自動產生）
 │   └── _released/<名稱>/       ← 發布區：model.js、release.json（版本、sha256）、history.jsonl
 ├── game/                       ← 你的遊戲專案（flow.config.json 的 project_dir）；不進這個工具的版控，有自己的 git

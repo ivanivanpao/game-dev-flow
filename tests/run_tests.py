@@ -57,6 +57,25 @@ for d in ('gates', 'lab', 'agents', 'checks', 'gui', 'node_modules'):
 (SB / 'models' / 'box' / 'spec.json').write_text(json.dumps({'name': 'box', 'checks': {'size': [[5, 6], None, None]},
     'views': [{'name': '1-iso', 'dir': [1, 0.6, 1], 'dist': 'fit', 'describe': '方塊'}]}), 'utf-8')
 (SB / 'models' / 'box' / 'checklist.md').write_text('# 清單', 'utf-8')
+
+
+def png1x1():
+    """產生一張 1×1 的 PNG（測試用的參考圖）"""
+    import struct, zlib
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00')) + chunk(b'IEND', b''))
+
+
+# 有參考圖的測試模型：沒有尺寸要求，關卡會過，才會叫到視覺審查者
+(SB / 'models' / 'refcar').mkdir()
+shutil.copy(SB / 'models' / 'box' / 'model.js', SB / 'models' / 'refcar' / 'model.js')
+(SB / 'models' / 'refcar' / 'spec.md').write_text('# 車', 'utf-8')
+(SB / 'models' / 'refcar' / 'spec.json').write_text(json.dumps({'name': 'refcar', 'checks': {},
+    'views': [{'name': '1-iso', 'dir': [1, 0.6, 1], 'dist': 'fit', 'describe': '車'}]}), 'utf-8')
+(SB / 'models' / 'refcar' / 'checklist.md').write_text('# 清單', 'utf-8')
+(SB / 'models' / 'refcar' / 'ref.png').write_bytes(png1x1())
 # 假的 claude
 fake = SB / 'fake'; fake.mkdir()
 shutil.copy(Path(__file__).resolve().parent / 'fake_claude.py', fake / 'fake_claude.py')
@@ -148,6 +167,23 @@ check('#12 遊戲開發者：改驗收清單 → 擋下', guard(grule, {'file_pa
 check('#12 遊戲開發者：NotebookEdit 也會檢查', guard(grule, {'notebook_path': str(SB / 'checks' / 'x.ipynb')}, tool='NotebookEdit')[0] == 2)
 check('#12 沒有規則 → 擋下（拿不準就不放行）', guard(None, {'file_path': str(SB / 'game' / 'a.js')})[0] == 2)
 check('#12 讀不懂輸入 → 擋下', guard(grule, None, raw='不是 JSON')[0] == 2)
+
+# #13 參考圖：挑哪些檔案、超過張數或大小就略過、換圖指紋會變
+rd = TMP / 'refs'; rd.mkdir()
+for n in ('ref-b.jpg', 'ref-c.webp', 'ref-d.jpeg', 'ref-e.png', 'ref.png', 'notref.png', 'ref.txt', 'reopen.md'):
+    (rd / n).write_bytes(b'x')
+(rd / 'ref-big.png').write_bytes(b'\0' * (O.REF_MAX_BYTES + 1))
+(rd / 'ref-empty.png').write_bytes(b'')
+use, skip = O.ref_images(rd)
+check('#13 只挑 ref 開頭的圖片，ref.png 排第一，最多 4 張', [p.name for p in use] == ['ref.png', 'ref-b.jpg', 'ref-c.webp', 'ref-d.jpeg'], use)
+sk = dict(skip)
+check('#13 太大、空檔案、超過張數 → 略過並寫明原因', set(sk) == {'ref-big.png', 'ref-empty.png', 'ref-e.png'}
+      and 'MB' in sk['ref-big.png'] and '空' in sk['ref-empty.png'] and '張' in sk['ref-e.png'], skip)
+check('#13 資料夾不存在 → 沒有參考圖，不會當掉', O.ref_images(TMP / 'no-such-dir') == ([], []))
+fp1 = O.model_inputs('js', rd, 'cl', use)
+(rd / 'ref.png').write_bytes(b'y')
+check('#13 換了參考圖 → 這一輪的輸入指紋會變（不會沿用上一輪的審查結果）', fp1 != O.model_inputs('js', rd, 'cl', use))
+check('#13 沒有參考圖 → 指紋跟加入參考圖功能之前一樣', O.model_inputs('js', rd, 'cl', []) == O.fingerprint('js', '', '', 'cl'))
 
 # #10 引用檢查
 proj = SB / 'scanproj' / 'src'; (proj / 'models').mkdir(parents=True)
@@ -275,6 +311,19 @@ mr = json.loads(calls[0]['rules']) if calls and calls[0]['rules'] else {}
 check('#12 模型開發者有掛改檔守門員，只准改 model.js',
       'guard.py' in (calls[0]['hook'] or '') and [Path(p).resolve() for p in mr.get('allow_files', [])] == [(SB / 'models' / 'box' / 'model.js').resolve()]
       and not mr.get('allow_dirs'), calls)
+REF_SECTION = '# 參考圖\n這個資料夾裡有人類提供的參考圖：'     # 協調器插進開發者提示詞的段落開頭（角色說明裡也有「# 參考圖」字樣，不能只比對標題）
+check('#13 沒有參考圖 → 開發者的提示詞沒有參考圖段落', calls and REF_SECTION not in calls[0]['prompt'], calls[0]['prompt'][-600:] if calls else calls)
+
+# 做模型（有參考圖）：開發者被告知要看參考圖；參考圖放進審查者隔離資料夾的 ref/，跟截圖分開
+LOG.unlink(missing_ok=True)
+rc, out = orch('model', 'refcar', '--rounds', '1')
+calls = [json.loads(l) for l in LOG.read_text('utf-8').splitlines()]
+devc = [c for c in calls if c['mode'] == 'acceptEdits']
+visc = [c for c in calls if c['tools'] == 'Read']
+check('#13 有參考圖 → 開發者的提示詞列出 ref.png 並要它用 Read 看', devc and REF_SECTION + 'ref.png' in devc[0]['prompt'], out[-800:])
+check('#13 參考圖放進審查者隔離資料夾的 ref/，截圖照常在', visc and 'ref/ref.png' in visc[0]['files'] and '1-iso.png' in visc[0]['files'], visc[0]['files'] if visc else out[-800:])
+check('#13 審查者的提示詞把參考圖和截圖分開列出', visc and '- ref/ref.png' in visc[0]['prompt'] and '參考圖' in visc[0]['prompt'], visc[0]['prompt'][-600:] if visc else '')
+check('#13 開發者看過參考圖後，參考圖沒被動到', (SB / 'models' / 'refcar' / 'ref.png').read_bytes() == png1x1())
 
 # ---------- GUI：檢視器頁面隔離 ----------
 lab = SB / 'workspace' / 'lab'; lab.mkdir(parents=True, exist_ok=True)
@@ -292,6 +341,19 @@ try:
     token = re.search(r"const TOKEN = '([^']+)'", html).group(1)
     hdr = urllib.request.urlopen(f'http://127.0.0.1:{port}/ws/lab/t.html?t={token}').headers.get('Content-Security-Policy')
     check('#4 檢視器頁面有 sandbox 標頭', hdr == 'sandbox allow-scripts', hdr)
+
+    def http_status(path, token_q=True):
+        try:
+            r = urllib.request.urlopen(f'http://127.0.0.1:{port}{path}' + (f'?t={token}' if token_q else ''))
+            return r.status, r.headers.get('Content-Type')
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    ov = json.loads(urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{port}/api/overview', headers={'X-Token': token})).read())
+    refm = {m['name']: m['refs'] for m in ov['models']}
+    check('#13 介面總覽列出模型的參考圖', refm.get('refcar') == [{'file': 'ref.png', 'skip': None}] and refm.get('box') == [], refm)
+    check('#13 介面拿得到參考圖（image/png）', http_status('/ref/refcar/ref.png') == (200, 'image/png'), http_status('/ref/refcar/ref.png'))
+    check('#13 介面拿不到模型資料夾裡的其他檔案', http_status('/ref/refcar/spec.md')[0] == 404 and http_status('/ref/refcar/..%2Fbox%2Fmodel.js')[0] == 404)
+    check('#13 沒帶 token 拿不到參考圖', http_status('/ref/refcar/ref.png', token_q=False)[0] == 403)
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         br = p.chromium.launch(headless=True, channel='chromium', args=['--enable-unsafe-webgpu'])

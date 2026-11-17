@@ -317,8 +317,9 @@ def review_agent(role, prompt, cwd, tools, allowed, dry, slot):
     return run_agent(role, retry, cwd, tools, allowed, CFG['agent_timeout_sec'], dry, slot)
 
 
-def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot):
-    """視覺審查者：在系統暫存區的隔離資料夾裡，只放截圖、說明文字與清單（沒有程式碼、沒有開發者自評）"""
+def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot, refs=()):
+    """視覺審查者：在系統暫存區的隔離資料夾裡，只放截圖、說明文字與清單（沒有程式碼、沒有開發者自評）。
+    refs：人類提供的參考圖，放進子資料夾 ref/，跟截圖分開，檔名也不會撞到截圖"""
     sandbox = Path(tempfile.mkdtemp(prefix='flow-visual-'))
     try:
         lines = ['# 每張截圖應該呈現什麼', '']
@@ -330,8 +331,13 @@ def visual_review(role_md, shots_dir, shots, extra_files, checklist, dry, slot):
         names = ['shots.md', 'checklist.md']
         for fname, text in extra_files.items():
             (sandbox / fname).write_text(text, 'utf-8'); names.append(fname)
+        if refs:
+            (sandbox / 'ref').mkdir()
+            for p in refs:
+                shutil.copy(p, sandbox / 'ref' / p.name)
         prompt = (read(ROOT / 'agents' / role_md) + '\n\n---\n你的工作資料夾裡有這些文字檔：' + '、'.join(names) +
                   '\n以及這些截圖：\n' + '\n'.join('- ' + s['file'] for s in shots) +
+                  (('\n以及人類提供的參考圖（不是截圖，是「應該長這樣」的參考）：\n' + '\n'.join('- ref/' + p.name for p in refs)) if refs else '') +
                   '\n請用 Read 工具逐一開啟每一個檔案（圖片與文字都要看），然後依格式輸出。')
         # 讀檔權限只開放「自己的隔離資料夾」：Read(./**) 只涵蓋工作資料夾，資料夾外的讀取在 dontAsk 模式下會被拒絕
         # （只寫 Read 等於允許讀電腦上任何檔案，審查者就有機會讀到專案程式碼）
@@ -358,6 +364,39 @@ def model_dir(name):
     if not d.is_dir() or not (d / 'spec.json').exists():
         sys.exit(f'找不到模型 {name}（需要 {d}/spec.json 與 spec.md）。')
     return d
+
+
+REF_EXTS = ('.png', '.jpg', '.jpeg', '.webp')     # 參考圖支援的格式
+REF_MAX = 4                                         # 最多幾張（每輪開發者與審查者都會看，張數越多越花用量）
+REF_MAX_BYTES = 5 * 1024 * 1024                     # 每張大小上限
+
+
+def ref_images(d):
+    """模型資料夾裡的參考圖：檔名以 ref 開頭的 png／jpg／webp。
+    依主檔名排序（ref.png 一定排在 ref-side.png 前面，超過張數時先略過的是後面的）。
+    回傳 (要用的檔案清單, 略過的 [(檔名, 原因)])；超過張數或大小的只略過，不讓流程失敗"""
+    d = Path(d)
+    if not d.is_dir():
+        return [], []
+    files = sorted((p for p in d.iterdir() if p.is_file() and p.name.lower().startswith('ref') and p.suffix.lower() in REF_EXTS),
+                   key=lambda p: (p.stem.lower(), p.suffix.lower()))
+    use, skip = [], []
+    for p in files:
+        size = p.stat().st_size
+        if size == 0:
+            skip.append((p.name, '是空檔案'))
+        elif size > REF_MAX_BYTES:
+            skip.append((p.name, f'超過 {REF_MAX_BYTES // 1024 // 1024}MB'))
+        elif len(use) >= REF_MAX:
+            skip.append((p.name, f'超過 {REF_MAX} 張'))
+        else:
+            use.append(p)
+    return use, skip
+
+
+def model_inputs(model_js, d, checklist, refs):
+    """這一輪的「輸入」指紋：model.js、規格、驗收清單、參考圖。跟上一輪完全一樣，重跑檢查與審查的結果也會一樣"""
+    return fingerprint(model_js, read(d / 'spec.md'), read(d / 'spec.json'), checklist, *(f'{p.name}:{sha256(p)}' for p in refs))
 
 
 def build_lab(name, out):
@@ -414,10 +453,15 @@ def cmd_model(args):
         entry = {'round': rnd}
         human = read(d / 'human-feedback.md')
         before = read(mj)
+        refs, ref_skip = ref_images(d)            # 每輪重讀：你在兩輪之間加的參考圖，下一輪就會用上
+        for f, why in ref_skip:
+            log(f'  警告：參考圖 {f} {why}，這一輪略過（最多 {REF_MAX} 張、每張 {REF_MAX_BYTES // 1024 // 1024}MB 以內）')
+        ref_text = ('\n\n# 參考圖\n這個資料夾裡有人類提供的參考圖：' + '、'.join(p.name for p in refs) +
+                    '\n請先用 Read 工具逐一開啟來看。參考圖用來對照整體輪廓、比例與配色；跟 spec.md 衝突時以 spec.md 為準。') if refs else ''
 
         log('模型開發者工作中…')
         prompt = (read(ROOT / 'agents' / 'model-dev.md') + f'\n\n---\n# 模型名稱\n{name}\n\n# spec.md（模型規格）\n' + read(d / 'spec.md') +
-                  '\n\n# spec.json（客觀檢查條件與截圖角度）\n```json\n' + read(d / 'spec.json') + '\n```\n\n# 驗收清單\n' + cl() +
+                  '\n\n# spec.json（客觀檢查條件與截圖角度）\n```json\n' + read(d / 'spec.json') + '\n```\n\n# 驗收清單\n' + cl() + ref_text +
                   '\n\n# 目前的 model.js\n```js\n' + (before or '（還沒有，請從頭建立）') + '\n```\n\n---\n# 上一輪回饋\n' + (feedback or '（第 1 輪，沒有回饋）') +
                   '\n\n---\n# 人類意見\n' + human + f'\n\n現在是第 {rnd} 輪（最多 {rounds} 輪）。')
         # 開發者上工前才記下要保護的檔案（除了這個模型的 model.js，整個工具資料夾都不准動）；
@@ -432,8 +476,7 @@ def cmd_model(args):
         diff = ''.join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), 'model.js(前)', 'model.js(後)'))
         entry['changed'] = bool(diff.strip())
 
-        # 這一輪的「輸入」：model.js、規格、驗收清單。跟上一輪完全一樣，重跑檢查與審查的結果也會一樣
-        inputs = fingerprint(after, read(d / 'spec.md'), read(d / 'spec.json'), cl())
+        inputs = model_inputs(after, d, cl(), refs)
         if prev and inputs == prev['inputs'] and not reverted:
             log('這一輪沒有任何改動：沿用上一輪的檢查與審查結果，不再呼叫審查者（省 AI 用量）')
             g, vis_out, code_out = prev['g'], prev['vis'], prev['code']
@@ -449,7 +492,7 @@ def cmd_model(args):
                 if CFG.get('model_reviewers', {}).get('visual', True):
                     log('視覺審查者（只看截圖）…')
                     vis_out = visual_review('reviewer-model-visual.md', ws / 'shots' / f'r{rnd:02d}', g['shots'],
-                                            {'spec.md': read(d / 'spec.md')}, cl(), dry, 'model_visual')
+                                            {'spec.md': read(d / 'spec.md')}, cl(), dry, 'model_visual', refs)
                     (ws / 'messages' / f'r{rnd:02d}-review-visual.md').write_text(vis_out, 'utf-8')
                     entry['visual'] = verdict(vis_out)
                 if CFG.get('model_reviewers', {}).get('code', False):

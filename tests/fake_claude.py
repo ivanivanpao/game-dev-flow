@@ -16,9 +16,11 @@ if '--settings' in args:
     s = json.loads(Path(args[args.index('--settings') + 1]).read_text('utf-8'))
     hook = s['hooks']['PreToolUse'][0]['hooks'][0]['command']
 retry = '【協調器：你上一次的輸出格式不對】' in prompt
+# 審查者的隔離資料夾裡有哪些檔案（開發者的工作資料夾可能很大，例如有 .git，不列）
+files = sorted(p.relative_to(Path.cwd()).as_posix() for p in Path.cwd().rglob('*') if p.is_file()) if tools == 'Read' else None
 with open(os.environ['FAKE_LOG'], 'a', encoding='utf-8') as f:
     f.write(json.dumps({'mode': mode, 'tools': tools, 'allowed': allowed, 'cwd': os.getcwd(), 'hook': hook,
-                        'rules': os.environ.get('FLOW_GUARD_RULES'), 'retry': retry}, ensure_ascii=False) + '\n')
+                        'rules': os.environ.get('FLOW_GUARD_RULES'), 'retry': retry, 'prompt': prompt, 'files': files}, ensure_ascii=False) + '\n')
 
 
 def review(verdict, defects, body='## 我最不確定的 3 件事\n- （假的審查者）'):

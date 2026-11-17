@@ -131,7 +131,9 @@ def overview():
             r = {'version': rel['version'], 'dry_run': bool(rel.get('dry_run')),
                  'tampered': not (rf.exists() and O.sha256(rf) == rel['sha256']),
                  'newer': not ((d / 'model.js').exists() and O.sha256(d / 'model.js') == rel['sha256'])}
-        models.append({'name': name, 'in_uses': name in uses,
+        use, skip = O.ref_images(d)
+        refs = [{'file': p.name, 'skip': None} for p in use] + [{'file': f, 'skip': why} for f, why in skip]
+        models.append({'name': name, 'in_uses': name in uses, 'refs': sorted(refs, key=lambda r: r['file']),
                        'run': {'state': st['state'], 'run_id': st['run_id'], 'dry_run': bool(st.get('dry_run')), 'rounds': len(st.get('history', []))} if st else None,
                        'released': r, 'reopen': (d / 'reopen.md').exists(), 'has_model_js': (d / 'model.js').exists(),
                        'todo': [f for f in ('spec.md', 'spec.json') if has_placeholder(d / f)]})
@@ -260,6 +262,9 @@ SPEC_MD = """# 模型規格：{title}（{name}）
 - 【正面、尖端、刃口朝哪個方向。】
 
 **不可以**：【例如：零件懸空、握柄過粗、比例失真。】
+
+**參考圖（選填）**：（沒有參考圖就留著這行。有的話，把圖片放進這個資料夾，檔名用 ref 開頭，例如 ref.png、ref-side.jpg；
+png／jpg／webp，最多 4 張、每張 5MB 以內。再把這行改成要參考圖的哪些地方、哪些不用照做，例如：照 ref.png 的車頭形狀和紅色，輪子細節不用那麼多。）
 """
 
 SPEC_JSON = {
@@ -371,6 +376,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, html, 'text/html; charset=utf-8')
         if u.path.startswith('/ws/'):
             return self._serve_ws(unquote(u.path[4:]))
+        if u.path.startswith('/ref/'):
+            return self._serve_ref(unquote(u.path[5:]))
         if not self._guard():
             return
         try:
@@ -414,6 +421,26 @@ class H(BaseHTTPRequestHandler):
             # 程式照樣能跑（allow-scripts），但碰不到這個介面的 API，就算從網址拿到 token 也沒用
             extra = {'Content-Security-Policy': 'sandbox allow-scripts'}
         self._send(200, p.read_bytes(), ctype, extra)
+
+    def _serve_ref(self, rel):
+        """唯讀提供模型的參考圖（/ref/<模型>/<檔名>，給模型頁預覽用；圖片無法帶標頭，所以 token 放網址）。
+        只認協調器認得的參考圖檔名（ref 開頭的 png／jpg／webp），模型資料夾裡的其他檔案一律拿不到"""
+        if not self._guard(token_in_query=True):
+            return
+        parts = rel.split('/')
+        if len(parts) != 2 or not NAME_RE.match(parts[0]) or parts[0] not in model_names():
+            return self._send(404, {'error': '找不到'})
+        d = models_dir() / parts[0]
+        try:
+            import orchestrator as O
+            use, skip = O.ref_images(d)
+        except Exception as e:
+            return self._send(400, {'error': f'讀取設定失敗：{e}'})
+        if parts[1] not in [p.name for p in use] + [f for f, _ in skip]:
+            return self._send(404, {'error': '找不到'})
+        p = d / parts[1]
+        ctype = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}[p.suffix.lower()]
+        self._send(200, p.read_bytes(), ctype)
 
     def do_POST(self):
         if not self._guard():

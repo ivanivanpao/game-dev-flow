@@ -174,6 +174,7 @@ async function api(path, body) {
   return j;
 }
 const wsUrl = rel => '/ws/' + rel.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent(TOKEN);
+const refUrl = (model, file) => '/ref/' + encodeURIComponent(model) + '/' + encodeURIComponent(file) + '?t=' + encodeURIComponent(TOKEN);
 function flash(el, msg, cls = 'ok') { el.textContent = msg; el.className = cls; setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000); }
 
 // 極簡 Markdown 轉換：標題、清單、表格、程式碼區塊、引用、粗體、行內程式碼（先跳脫 HTML，避免注入）
@@ -354,6 +355,11 @@ function renderModelHead() {
     <p>最近一次製作：${runText(m.run)} ${m.run ? `<a href="#" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}');return false">看紀錄</a>` : ''}　發布：${relText(m.released)}</p>
     ${m.todo.length ? `<div class="notice">${m.todo.join('、')} 還有【】沒填，AI 會照著範本文字做，請先填好。</div>` : ''}
     ${m.reopen ? '<div class="notice bad">這個模型被遊戲階段退件，退件內容在下方「reopen.md」。重新做模型時 AI 會看到。</div>' : ''}
+    <h3>參考圖（給 AI 看的）</h3>
+    ${m.refs.length ? `<div class="shots">${m.refs.map(r => `<figure><img src="${refUrl(m.name, r.file)}" alt="${esc(r.file)}" onclick="zoom(this.src)">
+      <figcaption><b>${esc(r.file)}</b>${r.skip ? ` <span class="tag bad">${esc(r.skip)}，不會用</span>` : ''}</figcaption></figure>`).join('')}</div>
+      <p class="help">模型開發者與視覺審查者每一輪都會看這些圖。要參考哪些地方、哪些不用照做，寫在 spec.md；跟 spec.md 衝突時以 spec.md 為準。</p>`
+    : `<p class="help">沒有參考圖。要給 AI 看的話，把圖片放進 <code>models/${esc(m.name)}/</code>，檔名用 ref 開頭（例如 ref.png、ref-side.jpg；png／jpg／webp，最多 4 張、每張 5MB 以內），再重新整理這個頁面。</p>`}
     <h3>1. 讓 AI 做模型</h3>
     <div class="row">最多 <input type="number" id="m-rounds" min="1" max="50" placeholder="設定值"> 輪
       <label><input type="checkbox" id="m-dry"> 乾跑（不呼叫 AI，只測流程，不能發布）</label>
