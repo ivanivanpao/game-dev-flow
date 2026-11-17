@@ -251,6 +251,7 @@ function editor(host, files) {
   function renderPv() { pv.innerHTML = cur && cur.path.endsWith('.md') ? md(ta.value) : '<pre>' + esc(ta.value) + '</pre>'; }
   async function save() {
     if (!cur || !writable) return;
+    if (!await okToWrite('存檔', '存的檔案')) return;
     try { await api('/api/file', {path: cur.path, content: ta.value}); orig = ta.value; host.querySelector('.ro').textContent = ''; flash(msg, '已儲存 ' + cur.path); markPh(); if (cur.onSave) cur.onSave(); }
     catch (e) { flash(msg, e.message, 'bad'); }
   }
@@ -402,6 +403,7 @@ async function quick(body) {
 }
 async function addCheck(model, inputId) {
   const text = $(inputId).value.trim(); if (!text) return;
+  if (!await okToWrite('加入', '加入的規則')) return;
   try { const r = await api('/api/cmd', {cmd: 'add-check', text, model}); if (r.rc !== 0) return alert(r.output); $(inputId).value = ''; alert('已加入清單：' + text); }
   catch (e) { alert(e.message); }
 }
@@ -428,6 +430,15 @@ async function buildGameEditor() {
 
 // ---------- 背景工作 ----------
 let jobSeen = 0, jobWasRunning = false;
+// 寫入工具資料夾裡的檔案前呼叫（編輯器存檔、加入清單、儲存設定）。有工作在跑就先確認：
+// AI 開發者工作期間，協調器會在那一輪結束時把整個工具資料夾還原成開工前的樣子，這時寫進去的內容會不見。
+// 即時問伺服器，不用畫面上每 1.5 秒更新一次的狀態，避免剛好錯過。回傳 true 才繼續寫
+// verb：動作（例如「存檔」）；what：會被還原的東西（例如「存的檔案」）
+async function okToWrite(verb, what) {
+  let job = null; try { job = await api('/api/job?since=999999999'); } catch (e) {}
+  if (!job || !job.running) return true;
+  return confirm(`目前有工作在跑：${job.cmd}\n\nAI 開發者工作中的話，你現在${what}會在那一輪結束時被還原（協調器分不出是你改的還是 AI 偷改的）。\n下方輸出最後一段已經是「關卡」或「審查者」（開發者這一輪做完了）再${verb}就安全；最保險是等工作結束。\n\n確定現在${verb}？`);
+}
 async function cmd(body) {
   try { await api('/api/cmd', body); jobSeen = 0; $('c-log').textContent = ''; $('console').classList.add('open'); pollJob(); }
   catch (e) { alert(e.message); }
@@ -550,6 +561,7 @@ async function saveSettings() {
     if (['model_max_rounds', 'max_rounds', 'stall_rounds', 'agent_timeout_sec'].includes(p) && (v === null || v < 1)) return flash($('s-msg'), label + ' 至少要 1', 'bad');
     setp(c, p, v);
   }
+  if (!await okToWrite('儲存設定', '儲存的設定')) return;
   try { await api('/api/config', {config: c}); CFG = c; flash($('s-msg'), '已儲存'); loadOverview(); buildGameEditor(); }
   catch (e) { flash($('s-msg'), e.message, 'bad'); }
 }
