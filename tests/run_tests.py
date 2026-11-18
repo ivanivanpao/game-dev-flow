@@ -508,6 +508,60 @@ check('#16 指定不存在的專案 → 拒絕並列出現有專案', rc != 0 an
 rc, out = fo('status')
 check('#16 專案缺了檔案 → 從範本補上並告訴你', rc == 0 and (fp / 'human-feedback.md').exists() and 'human-feedback.md' in out, out)
 
+# ---------- #17 架構檢查（templates/checks/arch-check.mjs）----------
+ARCH = SB / 'templates' / 'checks' / 'arch-check.mjs'
+arch_n = 0
+
+
+def arch(files):
+    """在一個新的暫時遊戲資料夾放入 files（{相對路徑: 內容}），執行架構檢查，回傳 (回傳碼, 輸出)"""
+    global arch_n
+    arch_n += 1
+    d = TMP / f'arch-{arch_n}'; d.mkdir()
+    for name, text in files.items():
+        p = d / name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text(text, 'utf-8')
+    r = subprocess.run(['node', str(ARCH), str(d)], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+    return r.returncode, r.stdout + r.stderr
+
+
+# 符合 prompt.md「程式架構」的小遊戲：分層方向正確、模型只從 models.js 拿、main.js 只接線、只有允許的全域變數
+GOOD = {
+    'src/main.js': "import { createLoop } from './core/loop.js';\nimport { Chopping } from './systems/chopping.js';\n"
+                   "import { installGameApi } from './debug/game-api.js';\nimport { createAxe } from './models.js';\n",
+    'src/models.js': "import * as THREE from 'three/webgpu';\nimport { build } from '../../models/_released/axe/model.js';\n"
+                     "export const createAxe = () => build(THREE);\n",
+    'src/core/loop.js': "import * as THREE from 'three/webgpu';\nexport function createLoop() { window.__renderBackend = 'webgpu'; }\n",
+    'src/core/rng.js': "export const rng = () => 0;\n",
+    'src/entities/tree.js': "import { rng } from '../core/rng.js';\nexport class Tree {}\n",
+    'src/systems/chopping.js': "import { Tree } from '../entities/tree.js';\nimport { createAxe } from '../models.js';\n"
+                               "export class Chopping { constructor() { this.ok = window.__game == null; } }\n",
+    'src/debug/game-api.js': "import { Chopping } from '../systems/chopping.js';\n// window.debugOnly = 1 這行是註解，不算\n"
+                             "export function installGameApi() { window.__game = { ready: true }; }\n",
+}
+rc, out = arch(GOOD)
+check('#17 架構檢查：照規範分層的遊戲 → 通過（註解裡的 window.x = 不算）', rc == 0 and '通過' in out, out)
+rc, out = arch({**GOOD, 'src/core/loop.js': "export function createLoop() {}\nimport { Chopping } from '../systems/chopping.js';\n"})
+check('#17 架構檢查：core/ import systems/ → 不通過，附檔案與行號', rc == 1 and '[分層]' in out and 'src/core/loop.js:2' in out, out)
+rc, out = arch({**GOOD, 'src/core/index.js': "export * from '../systems/chopping.js';\n",
+                'src/entities/tree.js': "export class Tree { async load() { await import('../debug/game-api.js'); } }\n"})
+check('#17 架構檢查：export … from 與 import() 也會被抓到', rc == 1 and 'src/core/index.js:1' in out and 'src/entities/tree.js:1' in out, out)
+rc, out = arch({**GOOD, 'src/systems/a.js': "import { b } from './b.js';\nexport const a = 1;\n",
+                'src/systems/b.js': "import { a } from './a';\nexport const b = 2;\n"})
+check('#17 架構檢查：循環引用（含省略副檔名）→ 不通過', rc == 1 and '[循環引用]' in out and 'a.js' in out and 'b.js' in out, out)
+rc, out = arch({**GOOD, 'src/systems/chopping.js': "import { build } from '../../../models/_released/axe/model.js';\nexport class Chopping {}\n"})
+check('#17 架構檢查：models.js 以外的檔案 import 已發布模型 → 不通過', rc == 1 and '[模型]' in out and 'src/systems/chopping.js:1' in out, out)
+rc, out = arch({**GOOD, 'src/main.js': GOOD['src/main.js'] + "import * as THREE from 'three/webgpu';\n"})
+check('#17 架構檢查：main.js 直接 import 套件 → 不通過', rc == 1 and '[main.js]' in out and 'three/webgpu' in out, out)
+rc, out = arch({**GOOD, 'src/entities/tree.js': "export class Tree {}\nwindow.score = 0;\nglobalThis['debugTree'] = Tree;\n"})
+check('#17 架構檢查：掛了不允許的全域變數 → 不通過（兩種寫法都抓到）',
+      rc == 1 and out.count('[全域變數]') == 2 and 'score' in out and 'debugTree' in out, out)
+rc, out = arch({'build.js': "const fs = require('fs');\n", 'index.html': '<script>window.anything = 1</script>'})
+check('#17 架構檢查：沒有 src/ 時掃整個遊戲資料夾，不會當掉', rc == 0 and '整個遊戲資料夾' in out, out)
+r = subprocess.run('node ../checks/arch-check.mjs', cwd=PJ / 'game', shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+check('#17 專案的 checks/ 有架構檢查，範本設定的指令 node ../checks/arch-check.mjs 在遊戲資料夾跑得起來',
+      (PJ / 'checks' / 'arch-check.mjs').read_bytes() == ARCH.read_bytes() and r.returncode == 0 and 'node ../checks/arch-check.mjs' in TPL_CFG['extra_checks'],
+      r.stdout + r.stderr)
+
 failed = sum(not ok for _, ok in results)
 print(f"\n共 {len(results)} 項，通過 {len(results) - failed} 項，失敗 {failed} 項")
 os.chdir(REAL)                     # 先離開副本資料夾，Windows 才刪得掉

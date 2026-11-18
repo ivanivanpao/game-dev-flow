@@ -16,6 +16,7 @@
 機器檢查（協調器自己跑，不靠任何 AI 判斷）：
 - [ ] `npm run build` 成功
 - [ ] 開啟頁面後沒有 JavaScript 錯誤、沒有 console 錯誤、沒有載入外部資源
+- [ ] 架構檢查（checks/arch-check.mjs）通過：依賴方向、循環引用、全域變數等規則見 prompt.md 的「程式架構」
 - [ ] 【自訂檢查，例如：連砍同一棵樹 9 次後，樹的狀態要變成 done】（寫成 flow.config.json 的 extra_checks）
 - [ ] 平均幀時間 ≤ 【N】 ms（沒設目標就刪掉這條）
 

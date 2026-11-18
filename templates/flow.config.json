@@ -26,7 +26,9 @@
     "target_avg_ms": null,
     "target_p95_ms": null
   },
-  "extra_checks": [],
+  "extra_checks": [
+    "node ../checks/arch-check.mjs"
+  ],
   "reviewers": {
     "visual": true,
     "code": true

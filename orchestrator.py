@@ -33,7 +33,8 @@ PROJECTS = ROOT / 'projects'                        # 每個遊戲一個專案�
 CURRENT_FILE = PROJECTS / '.current'                # 目前專案的名稱
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$')   # 專案名稱、遊戲資料夾名稱：英數字、底線、連字號
 # 專案裡你自己的檔案（相對於專案資料夾）：建立專案時從 templates/ 的同名範本複製；工具以後新增範本，缺的會自動補上
-USER_FILES = ('flow.config.json', 'TASK.md', 'prompt.md', 'human-feedback.md', 'checks/visual-checklist.md', 'checks/model-checklist.md')
+USER_FILES = ('flow.config.json', 'TASK.md', 'prompt.md', 'human-feedback.md', 'checks/visual-checklist.md', 'checks/model-checklist.md',
+              'checks/arch-check.mjs')      # 架構檢查：放在專案的 checks/，做遊戲時 AI 開發者改不到
 
 
 def ensure_user_files(p):
@@ -991,7 +992,8 @@ def cmd_run(args):
                         entry['visual'] = verdict(vis_out)
                     if CFG['reviewers'].get('code'):
                         log('程式審查者（看 diff）…')
-                        code_out = code_review(diff, read(P / 'TASK.md'), PROJECT, dry, 'game_code')
+                        # 連設計文件一起給：審查者要對照 prompt.md 的「程式架構」判斷結構問題
+                        code_out = code_review(diff, read(P / 'TASK.md') + '\n\n# 設計文件（prompt.md）\n' + read(P / 'prompt.md'), PROJECT, dry, 'game_code')
                         (ws / 'messages' / f'r{rnd:02d}-review-code.md').write_text(code_out, 'utf-8')
                         entry['code'] = verdict(code_out)
             gates_ok = bool(gm['ok'] and gb['ok'] and gbr and gbr['ok'] and gp['ok'] and all(x['rc'] == 0 for x in gx) and not reverted)

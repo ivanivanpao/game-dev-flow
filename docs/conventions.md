@@ -33,7 +33,8 @@ game-dev-flow/                  ← 工具本身
         ├── prompt.md / TASK.md / human-feedback.md   ← 設計文件／本輪任務／你的意見
         ├── checks/
         │   ├── model-checklist.md   ← 這個遊戲所有模型共通的驗收清單
-        │   └── visual-checklist.md  ← 遊戲的累積式驗收清單
+        │   ├── visual-checklist.md  ← 遊戲的累積式驗收清單
+        │   └── arch-check.mjs       ← 架構檢查（掛在 extra_checks）：依賴方向、循環引用、全域變數…；規則在檔案開頭的 RULES
         ├── agents.local/       ← （選用）客製的 agent 指令：放同名檔案就取代 agents/ 裡的那份；
         │                          代價是工具更新那份指令時，你的不會跟著更新
         ├── models/
@@ -71,14 +72,20 @@ game-dev-flow/                  ← 工具本身
 4. 建置指令一個就能跑完，結果是一個可直接開啟的 HTML。
 5. 只准 WebGPU：用 `three/webgpu` 的 `WebGPURenderer`，`await renderer.init()` 後確認 `renderer.backend.isWebGPUBackend`，再設定 `window.__renderBackend = 'webgpu'`。關卡會檢查這個值（`flow.config.json` 的 `require_webgpu`，預設開啟）。瀏覽器不支援時要顯示訊息並停止，不退回 WebGL。
 
-遊戲裡引用模型的寫法（只能引用 `_released`）。遊戲資料夾和 `models/` 在同一個專案資料夾裡，路徑從檔案所在位置往上找，例如 `game/src/main.js`：
+6. 原始碼照 `prompt.md` 的「程式架構」分模組（預設 `src/main.js`、`src/models.js`、`core/`、`entities/`、`systems/`、`debug/`）。依賴方向、循環引用、全域變數、模型從哪裡引用、`main.js` 只做組裝，由 `checks/arch-check.mjs` 檢查（新專案預設掛在 `extra_checks` 的 `node ../checks/arch-check.mjs`）；職責混雜、複製貼上這類程式判斷不了的，交給程式審查者。不限制檔案行數。換架構時，`prompt.md` 那一節和 `arch-check.mjs` 開頭的 `RULES` 要一起改。
+
+遊戲裡引用模型的寫法（只能引用 `_released`，而且集中在 `src/models.js`）。遊戲資料夾和 `models/` 在同一個專案資料夾裡，路徑從檔案所在位置往上找，例如 `game/src/models.js`：
 
 ```js
+import * as THREE from 'three/webgpu';
 import { build as buildAxe, meta as axeMeta } from '../../models/_released/axe/model.js';
-const axe = buildAxe(THREE);        // THREE 由遊戲傳入，模型自己不 import 任何東西
+export const createAxe = () => buildAxe(THREE);   // THREE 由遊戲傳入，模型自己不 import 任何東西
+export { axeMeta };
 ```
 
-直接 import 工坊裡的 `models/axe/model.js` 會被「模型檢查」判為違規。
+其他檔案從 `src/models.js` 拿模型（例如 `import { createAxe } from '../models.js'`）。模型改版、座標約定變了，只要改這一個檔案。
+
+直接 import 工坊裡的 `models/axe/model.js` 會被「模型檢查」判為違規；在 `src/models.js` 以外的檔案 import `_released` 會被架構檢查判為違規。
 
 ## 鏡頭清單（shots.json）
 
