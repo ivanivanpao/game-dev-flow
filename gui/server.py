@@ -74,7 +74,8 @@ def model_names():
         d = models_dir()
     except ValueError:                       # 還沒有專案
         return []
-    return sorted(p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith('_')) if d.exists() else []
+    # 只列名稱合法的資料夾：名稱會放進網頁，奇怪的字元（引號、括號）不讓它出現在畫面上
+    return sorted(p.name for p in d.iterdir() if p.is_dir() and not p.name.startswith('_') and NAME_RE.match(p.name)) if d.exists() else []
 
 
 def inside(p, base):
@@ -136,6 +137,40 @@ def write_text(p, text):
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, 'w', encoding='utf-8', newline='') as f:
         f.write(text)
+
+
+def raw_cfg():
+    """專案自己的 flow.config.json 原樣內容（不合併範本預設值）。改設定時以它為底，只改有變的項目，
+    你檔案裡沒寫的項目就繼續用工具的預設值"""
+    return json.loads((pdir() / 'flow.config.json').read_text('utf-8'))
+
+
+def save_raw_cfg(c):
+    write_text(pdir() / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
+
+
+def apply_changes(c, changes):
+    """把 {"perf.target_avg_ms": 16.7, …} 這種「用點分隔的路徑: 新值」套進設定 c（中間缺的層會補上）"""
+    if not isinstance(changes, dict):
+        raise ValueError('設定格式錯誤')
+    for path, v in changes.items():
+        ks = path.split('.') if isinstance(path, str) else []
+        if not ks or not all(re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', k) for k in ks):
+            raise ValueError(f'設定項目名稱不正確：{path!r}')
+        a = c
+        for k in ks[:-1]:
+            if not isinstance(a.get(k), dict):
+                a[k] = {}
+            a = a[k]
+        a[ks[-1]] = v
+    return c
+
+
+UNSAFE_CHARS_RE = re.compile(r'[\'"<>`\\&]')            # 執行紀錄的資料夾、檔案名稱有這些字元就不列（會放進網頁；中文檔名照常列出）
+
+
+def safe_name(s):
+    return bool(s) and not UNSAFE_CHARS_RE.search(s)
 
 
 def has_placeholder(p):
@@ -235,6 +270,15 @@ def stop_job():
     else:
         p.terminate()
     JOB['log'].append('（已由介面手動停止）')
+    # 強制結束時協調器來不及還原受保護的檔案（開發者這一輪可能用 node 改過驗收清單等）：等它真的結束，照硬碟上的快照改回來
+    try:
+        p.wait(timeout=30)
+        changed, keep = orch().recover_protect()
+        if changed:
+            JOB['log'].append('已把開發者這一輪改過的受保護檔案改回停止前的內容：' + '、'.join(changed))
+            JOB['log'].append(f'（改回來之前的版本存在 {keep}）')
+    except Exception as e:
+        JOB['log'].append(f'還原受保護的檔案失敗：{e}。下次開始做模型或做遊戲時會再試一次。')
     return True
 
 
@@ -350,10 +394,11 @@ def new_model(b):
     write_text(d / 'spec.json', json.dumps(spec, ensure_ascii=False, indent=2) + '\n')
     write_text(d / 'checklist.md', f'# {title}的專屬驗收清單（累積式）\n')
     if b.get('add_to_uses'):
-        c = cfg()
-        if name not in c.setdefault('uses_models', []):
-            c['uses_models'].append(name)
-            write_text(pdir() / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
+        uses = list(cfg().get('uses_models', []))
+        if name not in uses:
+            c = raw_cfg()                              # 只改 uses_models 這一項，不把其他預設值寫進你的檔案
+            c['uses_models'] = uses + [name]
+            save_raw_cfg(c)
     return {'created': name}
 
 
@@ -367,7 +412,7 @@ def list_runs():
         return []
     runs = []
     for d in ws.iterdir():
-        if not d.is_dir() or d.name == 'lab':
+        if not d.is_dir() or d.name == 'lab' or not safe_name(d.name):
             continue
         st = {}
         if (d / 'status.json').exists():
@@ -388,6 +433,7 @@ def run_files(run_id):
         raise ValueError('找不到這筆紀錄')
     files = [str(p.relative_to(d)).replace('\\', '/') for p in sorted(d.rglob('*'))
              if p.is_file() and p.suffix in ('.md', '.json', '.png') and p.name != 'status.json']
+    files = [f for f in files if safe_name(f)]       # 名稱有引號等字元的檔案不列
     return {'id': run_id, 'files': files}
 
 
@@ -522,10 +568,8 @@ class H(BaseHTTPRequestHandler):
                 write_text(p, text)
                 return self._send(200, {'saved': True})
             if u.path == '/api/config':
-                c = b.get('config')
-                if not isinstance(c, dict):
-                    raise ValueError('設定格式錯誤')
-                write_text(pdir() / 'flow.config.json', json.dumps(c, ensure_ascii=False, indent=2) + '\n')
+                # 只收「有改的項目」：以你原本的檔案為底套上去，沒改的項目不會被寫進檔案（繼續用工具的預設值）
+                save_raw_cfg(apply_changes(raw_cfg(), b.get('changes')))
                 return self._send(200, {'saved': True})
             if u.path == '/api/cmd':
                 return self._send(200, do_cmd(b))

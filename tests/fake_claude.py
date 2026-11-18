@@ -42,6 +42,11 @@ if mode == 'acceptEdits':                       # 開發者
         (sb / 'checks' / 'cheat-new.md').write_text('cheat', 'utf-8')
         s = Path.cwd() / 'shots.json'
         s.write_text('{"shots": []}', 'utf-8')
+    if sc == 'model_slow':                      # 偷改驗收清單後一直不結束：模擬「開發者工作到一半，你按了介面的停止」
+        c = sb / 'checks' / 'model-checklist.md'
+        c.write_text(c.read_text('utf-8') + '\n- CHEAT\n', 'utf-8')
+        import time
+        time.sleep(120)
     print('## 這一輪做了什麼\n- （假的開發者）')
 elif tools == 'Read':                            # 視覺審查者
     if sc == 'game_low':

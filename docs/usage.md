@@ -35,9 +35,9 @@ python orchestrator.py status --project forest                   # 其他指令�
 ```
 
 - 介面上方的下拉選單就是目前專案，旁邊「＋ 新增專案」。有工作在跑時不能切換。
-- 新增專案會從 `templates/` 建立設定、任務、清單和 `models/_released/`；遊戲資料夾裡放 `shots.json` 範本，並執行 `git init -b main`（不 commit）。做遊戲前，遊戲資料夾要有第一個 commit。
+- 新增專案會從 `templates/` 建立設定、任務、清單和 `models/_released/`；遊戲資料夾裡放 `shots.json` 範本和 `.gitignore`（排除 `node_modules/`、`dist/`），並執行 `git init -b main`（不 commit）。做遊戲前，遊戲資料夾要有第一個 commit。
 - 建置設定（`build_cmd`、`entry`）用預設值（`npm run build`、`dist/index.html`），跟你的遊戲不同就到「設定」改。
-- `projects/` 整個不在工具的版控裡，`git pull` 更新工具不會動到它。工具新增的設定項目，你的設定檔裡沒有也沒關係，會用 `templates/flow.config.json` 裡的預設值；工具新增的範本檔，下次執行時會補進專案。
+- `projects/` 整個不在工具的版控裡，`git pull` 更新工具不會動到它。工具新增的設定項目，你的設定檔裡沒有也沒關係，會用 `templates/flow.config.json` 裡的預設值（在介面的「設定」存檔時，只會寫入你改過的項目，沒動的項目不會被寫進你的設定檔）；工具新增的範本檔，下次執行時會補進專案。
 
 ## 1. 看目前狀態
 
@@ -76,7 +76,9 @@ python orchestrator.py lab axe          # 建出檢視器並用瀏覽器打開�
 python orchestrator.py release axe      # 你滿意了才發布
 ```
 
-`release` 會檢查：最近一次迴圈是通過的、不是 dry-run、且 model.js 在通過之後沒有再被改動。任何一項不符就拒絕。
+`release` 會檢查：最近一次迴圈是通過的、不是 dry-run、且通過之後 model.js、spec.json、spec.md、驗收清單（模型專屬的與 `checks/model-checklist.md`）、參考圖都沒有再被改動（新增或刪除參考圖也算）。任何一項不符就拒絕，並列出是哪些檔案。通過之後改了規格，就要重跑一次迴圈。
+
+發布時也會把當時的 `spec.md` 存一份到 `models/_released/<名稱>/`，做遊戲時給 AI 看的是這份。之後你改工坊裡的 `spec.md`，不會影響已發布的版本。
 
 不滿意：把意見寫進 `models/axe/human-feedback.md`，穩定的規則存起來，再跑一次：
 
@@ -94,12 +96,14 @@ python orchestrator.py run --dry-run --rounds 1
 python orchestrator.py run                 # 做遊戲：AI 反覆修改你的遊戲程式
 ```
 
+- `gates` 的過關條件跟 `run` 一樣：模型檢查、建置、瀏覽器、效能、自訂檢查（`extra_checks`，例如架構檢查）全部通過，回傳碼才是 0。自訂檢查沒過時會印出它的輸出，看得到是哪個檔案、哪一行。
 - 模型沒發布完，`run` 會直接擋下並列出缺哪些。
 - 遊戲資料夾還沒用 git 的話，`run` 會自動 `git init`，並把目前的檔案存成第一個版本（分支 `main`）。
 - 遊戲資料夾有還沒 commit 的修改，`run` 也會直接擋下並列出是哪些檔案。請先自己 commit，工具不會替你存。
 - 開始時記下你原本的分支（例如 `main`），另開分支 `auto/<時間>` 給 AI 改，每輪一個 commit。**你原本的分支不會被動到。**
 - 結束時（不管通過、失敗、出錯、或在命令列按 Ctrl+C）會自動切回你原本的分支。AI 的修改留在 `auto/<時間>`。
 - 在介面按「停止」是強制結束，工具來不及切回去，遊戲資料夾會暫時停在 `auto/<時間>`。下次按「開始做遊戲」時，工具會先發現「上次沒收尾」，把留下的修改存進那個 `auto/` 分支，再切回你原本的分支，然後才開始。
+- 強制結束時，工具也來不及還原「AI 開發者這一輪改過的受保護檔案」（見 [rules.md](rules.md) 的保護機制）。介面按「停止」後會馬上照硬碟上的快照改回來，執行紀錄裡會列出還原了哪些檔案。如果是關掉視窗或當機，下次開始做模型或做遊戲時會先還原。被改回來之前的版本另存在 `projects/.protect/recovered-<時間>/`，萬一那是你停止後自己改的，可以從那裡拿回來。
 - 結束後看 `workspace/<時間>/REPORT.md`，切到 `auto/<時間>` 親自玩，滿意才合併。
 
 ## 5. 遊戲階段發現模型有問題
@@ -129,6 +133,6 @@ python orchestrator.py run                 # 做遊戲：AI 反覆修改你的�
 ```
 
 - 會在系統暫存區建一份專案副本，用「假的 claude」（`tests/fake_claude.py`）跑做模型、做遊戲、GUI 的實際流程。**不呼叫真的 Claude、不消耗訂閱額度、不動你真正的專案和遊戲。**
-- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 118 項，通過 118 項，失敗 0 項」。大約一兩分鐘。
+- 每一項印出 `PASS` 或 `FAIL`，最後一行是總結，例如「共 139 項，通過 139 項，失敗 0 項」。大約一兩分鐘。
 - 全部通過會自動刪掉副本；有失敗會保留副本並印出位置，方便查原因。
 - 如果是**故意**改變某個行為（例如改了退件規則），測試也要跟著改，不然會顯示失敗。

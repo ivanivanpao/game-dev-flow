@@ -6,6 +6,8 @@
   1. 幾何統計：尺寸、包圍盒位置（驗證座標約定）、三角形數、材質數、有沒有 NaN
   2. 對照模型規格 spec.json 的 checks，逐條判定過／不過
   3. 依 spec.json 的 views 從各個角度截圖（給視覺審查者看）
+  4. 抓「偷偷載入外部素材」的請求（跟遊戲的瀏覽器關卡一樣）：模型只能用程式產生，不能從網路載入圖片、模型、音效或程式庫。
+     不在這裡擋，模型會帶著問題發布，到遊戲階段才被瀏覽器關卡擋下，而遊戲開發者不准改已發布的模型，只會卡住
 輸出 gate-result.json
 """
 import argparse, json, shlex, time
@@ -53,7 +55,7 @@ def main():
     spec = json.loads(Path(a.spec).read_text('utf-8'))
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     w, h = [int(v) for v in a.viewport.lower().split('x')]
-    res = {'ok': True, 'errors': [], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': [], 'gpu': None}
+    res = {'ok': True, 'errors': [], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': [], 'gpu': None, 'violations': []}
 
     # WebGPU 需要：channel='chromium'（完整版 Chromium 的新版無頭模式，能用到真的顯示卡）＋ --enable-unsafe-webgpu。
     # 預設的「無頭精簡版」只能拿到 SwiftShader 軟體模擬，Three.js 的繪圖管線會建立失敗，截圖只剩背景色。
@@ -65,6 +67,11 @@ def main():
         page = browser.new_page(viewport={'width': w, 'height': h})
         page.on('pageerror', lambda e: res['errors'].append(f'頁面錯誤: {e}'[:400]))
         page.on('console', lambda m: res['errors'].append('console 錯誤: ' + m.text[:300]) if m.type == 'error' and 'GPU stall' not in m.text and 'GL Driver' not in m.text else None)
+        def on_request(r):
+            u = r.url
+            if not u.startswith(('file:', 'data:', 'blob:', 'about:')):     # 檢視器本身是單一 HTML 檔，任何網路請求都是模型發出的
+                res['violations'].append('載入了外部資源：' + u[:200])
+        page.on('request', on_request)
         page.goto(Path(a.html).resolve().as_uri())
         page.add_style_tag(content='#info{display:none !important}')   # 截圖不要有說明框，避免干擾判斷
         try:
@@ -94,9 +101,9 @@ def main():
                     res['errors'].append(f"截圖 {v.get('name')} 失敗: {e}"[:300])
         browser.close()
 
-    res['ok'] = not res['errors'] and not res['failed_checks'] and res['stats'] is not None
+    res['ok'] = not res['errors'] and not res['violations'] and not res['failed_checks'] and res['stats'] is not None
     (out / 'gate-result.json').write_text(json.dumps(res, ensure_ascii=False, indent=2), 'utf-8')
-    print(json.dumps({'ok': res['ok'], 'failed': len(res['failed_checks']), 'shots': len(res['shots']), 'stats': res['stats']}, ensure_ascii=False))
+    print(json.dumps({'ok': res['ok'], 'failed': len(res['failed_checks']), 'violations': len(res['violations']), 'shots': len(res['shots']), 'stats': res['stats']}, ensure_ascii=False))
 
 
 if __name__ == '__main__':

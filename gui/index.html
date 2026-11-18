@@ -528,7 +528,7 @@ async function loadOverview() {
   $('ov-error').innerHTML = '';
   $('ov-flow').innerHTML = flowStrip(OV);
   $('ov-next').innerHTML = nextSteps(OV);
-  $('ov-models').innerHTML = OV.models.length ? '<div class="mgrid">' + OV.models.map(m => `<button class="mcard" onclick="pickModel('${esc(m.name)}');goTab('models')">
+  $('ov-models').innerHTML = OV.models.length ? '<div class="mgrid">' + OV.models.map(m => `<button class="mcard" data-name="${esc(m.name)}" onclick="pickModel(this.dataset.name);goTab('models')">
       <span class="mcard-top"><span class="mname">${esc(m.name)}</span>${m.in_uses ? '<span class="tag">遊戲用到</span>' : ''}${m.reopen ? '<span class="tag bad">被退件</span>' : ''}</span>
       <span class="mrow"><span class="k">製作</span>${runText(m.run)}</span>
       <span class="mrow"><span class="k">發布</span>${relText(m.released)}</span></button>`).join('') + '</div>'
@@ -562,7 +562,7 @@ async function newProject() {
 function renderModelList() {
   // 左邊清單的狀態點：被退件＝紅、已發布＝綠、通過待發布＝青、其他＝灰
   const dot = m => m.reopen ? 'bad' : (m.released ? 'ok' : (m.run && m.run.state === 'approved' ? 'acc' : ''));
-  $('m-list').innerHTML = OV.models.map(m => `<button class="b ${m.name === CUR_MODEL ? 'on' : ''}" onclick="pickModel('${esc(m.name)}')"><span class="dot ${dot(m)}"></span><span class="li-name">${esc(m.name)}</span>
+  $('m-list').innerHTML = OV.models.map(m => `<button class="b ${m.name === CUR_MODEL ? 'on' : ''}" data-name="${esc(m.name)}" onclick="pickModel(this.dataset.name)"><span class="dot ${dot(m)}"></span><span class="li-name">${esc(m.name)}</span>
     ${m.released ? '<span class="tag ok">v' + m.released.version + '</span>' : ''}${m.reopen ? ' <span class="tag bad">退件</span>' : ''}</button>`).join('');
   if (CUR_MODEL) renderModelHead();
 }
@@ -583,7 +583,7 @@ function renderModelHead() {
   const m = OV.models.find(x => x.name === CUR_MODEL); if (!m || !$('m-head')) return;
   $('m-head').innerHTML = `<div class="card">
     <div class="card-head"><h2>${esc(m.name)}</h2>${m.in_uses ? '<span class="tag">遊戲用到</span>' : ''}</div>
-    <dl class="kv"><dt>最近一次製作</dt><dd>${runText(m.run)} ${m.run ? `<a href="#" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}');return false">看紀錄</a>` : ''}</dd>
+    <dl class="kv"><dt>最近一次製作</dt><dd>${runText(m.run)} ${m.run ? `<a href="#" data-run="model-${esc(m.name)}-${esc(m.run.run_id)}" onclick="openRun(this.dataset.run);return false">看紀錄</a>` : ''}</dd>
       <dt>發布</dt><dd>${relText(m.released)}</dd></dl>
     ${m.todo.length ? `<div class="notice">${m.todo.join('、')} 還有【】沒填，AI 會照著範本文字做，請先填好。</div>` : ''}
     ${m.reopen ? '<div class="notice bad">這個模型被遊戲階段退件，退件內容在下方「reopen.md」。重新做模型時 AI 會看到。</div>' : ''}</div>
@@ -594,9 +594,9 @@ function renderModelHead() {
         <div class="push"><button class="b p" onclick="runModel()">開始做模型</button></div></div>
       <div class="card"><div class="step-h"><span class="step-n">2</span><h3>自己看</h3></div>
         <div class="stack"><button class="b" onclick="openLab()">開檢視器（可拖曳旋轉）</button>
-          ${m.run ? `<button class="b" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}')">看最近一次的截圖與審查意見</button>` : ''}</div></div>
+          ${m.run ? `<button class="b" data-run="model-${esc(m.name)}-${esc(m.run.run_id)}" onclick="openRun(this.dataset.run)">看最近一次的截圖與審查意見</button>` : ''}</div></div>
       <div class="card"><div class="step-h"><span class="step-n">3</span><h3>滿意就發布</h3></div>
-        <p class="help">發布條件：最近一次製作通過、不是乾跑、通過後 model.js 沒被改過</p>
+        <p class="help">發布條件：最近一次製作通過、不是乾跑、通過後 model.js、規格、驗收清單、參考圖都沒被改過</p>
         <div class="row push"><button class="b p" onclick="release()">發布</button>
           <button class="b d" onclick="unrelease()" ${m.released ? '' : 'disabled'}>撤回發布</button></div></div>
     </div>
@@ -696,7 +696,7 @@ setInterval(pollJob, 1500);
 async function loadRuns() {
   const runs = await api('/api/runs');
   const kind = {model: '模型', game: '遊戲', gates: '只跑關卡'};
-  $('r-list').innerHTML = runs.length ? runs.map(r => `<button class="b ${r.id === CUR_RUN ? 'on' : ''}" onclick="openRun('${esc(r.id)}')">
+  $('r-list').innerHTML = runs.length ? runs.map(r => `<button class="b ${r.id === CUR_RUN ? 'on' : ''}" data-run="${esc(r.id)}" onclick="openRun(this.dataset.run)">
     <span class="li-name">${esc(r.id)}</span><span class="li-sub"><span class="tag">${kind[r.kind]}</span> ${esc(r.state || '')}${r.dry_run ? '・乾跑' : ''}${r.rounds ? '・' + r.rounds + ' 輪' : ''}</span></button>`).join('')
     : '<p class="muted">還沒有任何紀錄。</p>';
 }
@@ -707,13 +707,14 @@ async function openRun(id) {
   let h = `<h2>${esc(id)}</h2>`;
   if (f.includes('REPORT.md')) h += `<div class="card md">${md(await (await fetch(wsUrl(base + 'REPORT.md'))).text())}</div>`;
   const msgs = f.filter(x => x.startsWith('messages/'));
-  if (msgs.length) h += `<div class="card"><h2>每一輪的訊息</h2><div class="tabs">${msgs.map(m => `<button class="b" onclick="showMsg(this,'${esc(base + m)}')">${esc(m.replace('messages/', ''))}</button>`).join('')}</div><div id="r-msg" class="md"></div></div>`;
+  if (msgs.length) h += `<div class="card"><h2>每一輪的訊息</h2><div class="tabs">${msgs.map(m => `<button class="b" data-rel="${esc(base + m)}" onclick="showMsg(this,this.dataset.rel)">${esc(m.replace('messages/', ''))}</button>`).join('')}</div><div id="r-msg" class="md"></div></div>`;
   const dirs = [...new Set(f.filter(x => x.endsWith('.png')).map(x => x.slice(0, x.lastIndexOf('/'))))];
   for (const d of dirs.reverse()) {
     let desc = {};
     if (f.includes(d + '/gate-result.json')) { try { const g = await (await fetch(wsUrl(base + d + '/gate-result.json'))).json();
       (g.shots || []).forEach(s => desc[s.file] = s.describe);
       if ((g.errors || []).length) h += `<div class="notice bad">${esc(d)} 關卡錯誤：<br>${g.errors.map(esc).join('<br>')}</div>`;
+      if ((g.violations || []).length) h += `<div class="notice bad">${esc(d)} 違規（不能從網路載入素材）：<br>${g.violations.map(esc).join('<br>')}</div>`;
       if ((g.failed_checks || []).length) h += `<div class="notice bad">${esc(d)} 沒過的檢查：<br>${g.failed_checks.map(esc).join('<br>')}</div>`;
     } catch (e) {} }
     h += `<div class="card"><h2>截圖：${esc(d)}</h2><div class="shots">` + f.filter(x => x.startsWith(d + '/') && x.endsWith('.png')).map(x => {
@@ -782,6 +783,7 @@ async function loadSettings() {
 }
 async function saveSettings() {
   const c = JSON.parse(JSON.stringify(CFG));
+  const changes = {};                    // 只送「跟載入時不一樣」的欄位：沒動的項目不寫進你的設定檔，繼續用工具的預設值
   for (const [i, [p, label, type]] of FIELDS.entries()) {
     if (p === '#') continue;
     const el = $('f' + i);
@@ -793,10 +795,13 @@ async function saveSettings() {
     else if (type === 'uses') v = [...el.querySelectorAll('input:checked')].map(x => x.value);
     else v = el.value.trim();
     if (['model_max_rounds', 'max_rounds', 'stall_rounds', 'agent_timeout_sec'].includes(p) && (v === null || v < 1)) return flash($('s-msg'), label + ' 至少要 1', 'bad');
+    const same = (a, b) => JSON.stringify(a === '' ? null : a) === JSON.stringify(b === '' || b === undefined ? null : b);   // 空字串和沒填當成一樣
+    if (!same(v, getp(CFG, p))) changes[p] = v;
     setp(c, p, v);
   }
+  if (!Object.keys(changes).length) return flash($('s-msg'), '沒有改動，不用儲存');
   if (!await okToWrite('儲存設定', '儲存的設定')) return;
-  try { await api('/api/config', {config: c}); CFG = c; flash($('s-msg'), '已儲存'); loadOverview(); buildGameEditor(); }
+  try { await api('/api/config', {changes}); CFG = c; flash($('s-msg'), '已儲存'); loadOverview(); buildGameEditor(); }
   catch (e) { flash($('s-msg'), e.message, 'bad'); }
 }
 

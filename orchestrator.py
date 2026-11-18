@@ -31,6 +31,9 @@ ROOT = Path(__file__).resolve().parent             # 工具本身
 TEMPLATES = ROOT / 'templates'
 PROJECTS = ROOT / 'projects'                        # 每個遊戲一個專案資料夾；整個不進工具的版控
 CURRENT_FILE = PROJECTS / '.current'                # 目前專案的名稱
+# 保護檔案的快照放在硬碟上的位置（見 Protect）：中途被強制停止、來不及還原時，下次靠它改回來
+PROTECT_DIR = PROJECTS / '.protect'
+GAME_GITIGNORE = 'node_modules/\ndist/\n'            # 遊戲資料夾的 .gitignore：套件和建置產物不進遊戲的版控（每輪都會 git add -A）
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$')   # 專案名稱、遊戲資料夾名稱：英數字、底線、連字號
 # 專案裡你自己的檔案（相對於專案資料夾）：建立專案時從 templates/ 的同名範本複製；工具以後新增範本，缺的會自動補上
 USER_FILES = ('flow.config.json', 'TASK.md', 'prompt.md', 'human-feedback.md', 'checks/visual-checklist.md', 'checks/model-checklist.md',
@@ -127,6 +130,7 @@ def new_project(name, game='game'):
     g = p / game
     g.mkdir()
     shutil.copyfile(TEMPLATES / 'shots.json', g / 'shots.json')
+    (g / '.gitignore').write_text(GAME_GITIGNORE, 'utf-8')   # 沒有它，每輪的 git add -A 會把 node_modules/、dist/ 一起 commit
     rc, out = sh(['git', 'init', '-b', 'main'], g, 60)     # 做遊戲時會開 auto/<時間> 分支，遊戲資料夾必須是 git 專案；只初始化，不 commit
     use_project(name)
     return p, (rc == 0, out)
@@ -200,7 +204,7 @@ def inside(p, base):
 
 def walk_files(base, exclude=()):
     """列出 base 底下所有檔案（略過 SKIP_DIRS，以及 exclude 裡的檔案或資料夾）"""
-    base, exclude = Path(base), {Path(e).resolve() for e in exclude}
+    base, exclude = Path(base), {Path(e).resolve() for e in exclude} | {PROTECT_DIR.resolve()}   # 保護快照本身不算要保護的檔案
     if not base.is_dir():
         return []
     out = []
@@ -216,10 +220,21 @@ class Protect:
     範圍是整個工具資料夾（驗收清單、規格、設定、任務、關卡程式、AI 指令、已發布的模型…），
     只排除開發者本來就該改的地方。被改或被刪的檔案一律還原；多出來的新檔案只回報、不刪除。
     （否則開發者可以靠改驗收標準或改關卡程式來過關；它有 node 指令可用，不受工作資料夾限制）
-    注意：開發者工作的這段時間，你自己在介面上改的檔案也會被還原，請等這一輪結束再改。"""
-    def __init__(self, collect):
+    注意：開發者工作的這段時間，你自己在介面上改的檔案也會被還原，請等這一輪結束再改。
+    快照除了記在記憶體，也寫一份到硬碟（PROTECT_DIR/snapshot/）：程式被強制結束（介面的「停止」、關掉視窗、當機）
+    來不及還原時，介面停止後或下次開工前會用 recover_protect() 照它改回來。正常還原後就刪掉。"""
+    def __init__(self, collect, backup=PROTECT_DIR):
         self.collect = collect                          # 回傳「要保護的檔案清單」的函式
         self.saved = {p: p.read_bytes() for p in collect() if p.is_file()}
+        self.snap = Path(backup) / 'snapshot' if backup else None
+        if self.snap:
+            shutil.rmtree(self.snap, ignore_errors=True)
+            (self.snap / 'files').mkdir(parents=True)
+            index = {}
+            for i, (p, b) in enumerate(self.saved.items()):
+                (self.snap / 'files' / f'{i}.bin').write_bytes(b); index[str(p)] = f'{i}.bin'
+            # 清單最後才寫：有 manifest.json 代表快照完整；寫到一半被停止就沒有清單，那時開發者也還沒開工，不用還原
+            (self.snap / 'manifest.json').write_text(json.dumps(index, ensure_ascii=False), 'utf-8')
 
     def restore(self):
         """回傳 (被還原的檔案, 多出來的新檔案)"""
@@ -229,7 +244,40 @@ class Protect:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_bytes(b); changed.append(rel(p))
         added = [rel(p) for p in self.collect() if p not in self.saved]
+        if self.snap:
+            shutil.rmtree(self.snap, ignore_errors=True)
         return changed, added
+
+
+def recover_protect(backup=PROTECT_DIR):
+    """上次被強制停止、留下保護快照：照快照把被改過的受保護檔案改回來，回傳 (被還原的檔案, 改回來之前的版本存在哪裡)。
+    改回來之前的版本另存到 PROTECT_DIR/recovered-<時間>/，萬一那是你停止後自己改的，還拿得回來"""
+    snap = Path(backup) / 'snapshot'
+    m = snap / 'manifest.json'
+    changed, keep = [], None
+    if m.exists():
+        for path, fn in json.loads(m.read_text('utf-8')).items():
+            p, b = Path(path), (snap / 'files' / fn).read_bytes()
+            if p.exists() and p.read_bytes() == b:
+                continue
+            if p.exists():
+                keep = keep or Path(backup) / f'recovered-{datetime.datetime.now():%Y%m%d-%H%M%S}'
+                k = keep / rel(p).replace(':', '')               # 工具資料夾外面的檔案是完整路徑，去掉磁碟機的冒號
+                k.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(p, k)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b); changed.append(rel(p))
+    shutil.rmtree(snap, ignore_errors=True)
+    return changed, keep
+
+
+def recover_note():
+    """開工前呼叫：上次被強制停止留下快照，就先還原並在紀錄裡說明"""
+    changed, keep = recover_protect()
+    if changed:
+        log('上次中途被停止，來不及還原：已把這些受保護的檔案改回停止前的內容：' + '、'.join(changed))
+        log(f'  改回來之前的版本存在 {rel(keep)}（如果那是你停止後自己改的，從那裡拿回來）')
+    return changed
 
 
 def fingerprint(*parts):
@@ -504,6 +552,16 @@ def model_inputs(model_js, d, checklist, refs):
     return fingerprint(model_js, read(d / 'spec.md'), read(d / 'spec.json'), checklist, *(f'{p.name}:{sha256(p)}' for p in refs))
 
 
+def spec_hashes(d, refs):
+    """審查時對照的每個檔案各自的指紋（規格、兩份驗收清單、參考圖）。通過時記下，發布時再比一次：
+    通過之後改了規格，那次通過就不算數（model.js 另外比對）。回傳 {顯示名稱: 指紋}，檔案不存在是 None"""
+    files = {'spec.json': d / 'spec.json', 'spec.md': d / 'spec.md', 'checklist.md': d / 'checklist.md',
+             'checks/model-checklist.md': P / 'checks' / 'model-checklist.md'}
+    out = {k: (sha256(p) if p.exists() else None) for k, p in files.items()}
+    out.update({f'參考圖 {p.name}': sha256(p) for p in refs})
+    return out
+
+
 def build_lab(name, out):
     rc, o = sh(['node', str(ROOT / 'lab' / 'build_lab.mjs'), str(MODELS / name), str(out)], ROOT, 300)
     return rc == 0, tail(o, 1500)
@@ -511,13 +569,14 @@ def build_lab(name, out):
 
 def gate_model(name, shots_dir):
     d = model_dir(name)
+    fail = lambda e: {'ok': False, 'errors': [e], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': [], 'violations': []}
     if not (d / 'model.js').exists():
-        return {'ok': False, 'errors': ['model.js 還不存在'], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': []}
+        return fail('model.js 還不存在')
     html = Path(shots_dir) / 'lab.html'
     Path(shots_dir).mkdir(parents=True, exist_ok=True)
     ok, o = build_lab(name, html)
     if not ok:
-        return {'ok': False, 'errors': ['檢視器建置失敗（model.js 語法錯誤？沒執行過 npm install？）：' + o], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': []}
+        return fail('檢視器建置失敗（model.js 語法錯誤？沒執行過 npm install？）：' + o)
     cmd = [sys.executable, str(ROOT / 'gates' / 'model_gate.py'), '--html', str(html), '--spec', str(d / 'spec.json'),
            '--out', str(shots_dir), '--viewport', CFG.get('model_viewport', '900x700')]
     if browser_args():
@@ -527,13 +586,14 @@ def gate_model(name, shots_dir):
     rc, o = sh(cmd, ROOT, 600)
     f = Path(shots_dir) / 'gate-result.json'
     if rc != 0 or not f.exists():
-        return {'ok': False, 'errors': ['模型關卡當掉：' + tail(o, 1500)], 'failed_checks': [], 'passed_checks': [], 'stats': None, 'shots': []}
-    return json.loads(f.read_text('utf-8'))
+        return fail('模型關卡當掉：' + tail(o, 1500))
+    return {'violations': [], **json.loads(f.read_text('utf-8'))}
 
 
 def cmd_model(args):
     name, dry = args.name, args.dry_run
     d = model_dir(name)
+    recover_note()                  # 上次被強制停止、受保護的檔案來不及還原：先改回來
     rounds = args.rounds or CFG.get('model_max_rounds', 5)
     run_id, ws = new_run_dir(f'model-{name}-')
     (ws / 'messages').mkdir(); (ws / 'snapshots').mkdir()
@@ -575,8 +635,10 @@ def cmd_model(args):
         # 每一輪重新記，你在兩輪之間改的規格、清單、意見才不會被誤還原
         protected = Protect(lambda: walk_files(ROOT, exclude=[mj]))
         guard = {'allow_files': [mj], 'hint': f'只能改 models/{name}/model.js。'}     # 改其他檔案在改之前就擋下
-        dev_out = run_agent('dev', prompt, d, 'default', ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash(node *)'], CFG['agent_timeout_sec'], dry, 'model_dev', guard)
-        reverted, added = protected.restore()
+        try:
+            dev_out = run_agent('dev', prompt, d, 'default', ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash(node *)'], CFG['agent_timeout_sec'], dry, 'model_dev', guard)
+        finally:
+            reverted, added = protected.restore()      # 被 Ctrl+C 中斷也要還原
         (ws / 'messages' / f'r{rnd:02d}-dev.md').write_text(dev_out, 'utf-8')
         after = read(mj)
         shutil.copy(mj, ws / 'snapshots' / f'r{rnd:02d}-model.js') if mj.exists() else None
@@ -584,6 +646,7 @@ def cmd_model(args):
         entry['changed'] = bool(diff.strip())
 
         inputs = model_inputs(after, d, cl(), refs)
+        hashes = spec_hashes(d, refs)                  # 這一輪審查對照的規格與清單；通過時記進 status，發布時比對
         if prev and inputs == prev['inputs'] and not reverted:
             log('這一輪沒有任何改動：沿用上一輪的檢查與審查結果，不再呼叫審查者（省 AI 用量）')
             g, vis_out, code_out = prev['g'], prev['vis'], prev['code']
@@ -618,6 +681,7 @@ def cmd_model(args):
             fb += [f"- 警告：你新增了檔案（{'、'.join(added)}）。只能改 model.js，不要新增其他檔案。", '']
         fb.append('## 客觀關卡')
         fb += [f'- 失敗：{e}' for e in g['errors']]
+        fb += [f'- 違規：{v}（模型只能用程式產生，不能從網路載入圖片、模型、音效或程式庫）' for v in g.get('violations', [])]
         fb += [f'- 檢查不過：{c}' for c in g['failed_checks']]
         fb += [f'- 檢查通過：{c}' for c in g['passed_checks']]
         if g['stats']:
@@ -636,9 +700,9 @@ def cmd_model(args):
         status['history'].append(entry); save()
         log('本輪結果：', json.dumps(entry, ensure_ascii=False))
         if approved:
-            status['state'] = 'approved'; status['model_sha'] = sha256(mj); break
+            status['state'] = 'approved'; status['model_sha'] = sha256(mj); status['spec_hashes'] = hashes; break
         # 卡住偵測：比對「實際內容」，不比對 AI 評語（AI 每次用字都不同，比評語永遠不會判定卡住）
-        fails = sorted(re.sub(r'[\\/]r\d{2}[\\/]', '/', x) for x in g['errors'] + g['failed_checks'])   # 去掉路徑裡的輪數
+        fails = sorted(re.sub(r'[\\/]r\d{2}[\\/]', '/', x) for x in g['errors'] + g.get('violations', []) + g['failed_checks'])   # 去掉路徑裡的輪數
         no_change = no_change + 1 if entry.get('skipped') else 0
         same_fail = same_fail + 1 if (prev and fails and fails == prev['fails']) else 0
         prev = {'inputs': inputs, 'g': g, 'vis': vis_out, 'code': code_out, 'entry': entry, 'fails': fails}
@@ -699,10 +763,19 @@ def cmd_release(args):
     cur = sha256(d / 'model.js')
     if cur != st['model_sha']:
         sys.exit('model.js 在通過審查之後又被改動了，通過紀錄已失效。請重新跑一次 model 迴圈。')
+    # 規格、驗收清單、參考圖也要跟通過時一樣：通過之後改了規格，那次審查對照的就不是現在的規格
+    if 'spec_hashes' not in st:
+        sys.exit('這次通過紀錄是舊版工具產生的，沒有記下當時的規格，無法確認規格之後有沒有被改。請重新跑一次 model 迴圈。')
+    now = spec_hashes(d, ref_images(d)[0])
+    changed = sorted(k for k in set(now) | set(st['spec_hashes']) if now.get(k) != st['spec_hashes'].get(k))
+    if changed:
+        sys.exit('這些檔案在通過審查之後被改過（或新增、刪除）：' + '、'.join(changed) + '。通過紀錄已失效，請重新跑一次 model 迴圈。')
     prev = released_info(name)
     ver = (prev['version'] + 1) if prev else 1
     out = RELEASED / name; out.mkdir(parents=True, exist_ok=True)
     shutil.copy(d / 'model.js', out / 'model.js')
+    if (d / 'spec.md').exists():
+        shutil.copy(d / 'spec.md', out / 'spec.md')    # 發布當時的規格：遊戲開發者看這份，之後改工坊的 spec.md 不會影響已發布的版本
     last_shots = sorted((WS / f"model-{name}-{st['run_id']}" / 'shots').glob('r*'))
     stats = json.loads(read(last_shots[-1] / 'gate-result.json'))['stats'] if last_shots else None
     info = {'name': name, 'version': ver, 'sha256': cur, 'spec_sha256': sha256(d / 'spec.json'),
@@ -826,7 +899,8 @@ def models_context():
         if not rel:
             continue
         path = os.path.relpath(RELEASED / m / 'model.js', PROJECT).replace('\\', '/')     # 從遊戲資料夾算起的相對路徑
-        parts.append(f"## 模型 {m}（已發布 v{rel['version']}，引用路徑（從遊戲資料夾根目錄算起）：{path}）\n" + read(MODELS / m / 'spec.md') +
+        spec = RELEASED / m / 'spec.md'                 # 發布當時的規格；舊版工具發布的沒有這份，就讀工坊的
+        parts.append(f"## 模型 {m}（已發布 v{rel['version']}，引用路徑（從遊戲資料夾根目錄算起）：{path}）\n" + read(spec if spec.exists() else MODELS / m / 'spec.md') +
                      f"\n尺寸/統計：{json.dumps(rel.get('stats'), ensure_ascii=False)}")
     return '\n\n'.join(parts) or '（沒有已發布的模型）'
 
@@ -855,7 +929,7 @@ def git_start(run_id):
     if not (PROJECT / '.git').exists():
         # 遊戲資料夾還沒用 git：幫它建一個，並把目前的檔案存成第一個版本
         if not (PROJECT / '.gitignore').exists():
-            (PROJECT / '.gitignore').write_text('node_modules/\ndist/\n', 'utf-8')
+            (PROJECT / '.gitignore').write_text(GAME_GITIGNORE, 'utf-8')
         git_ok('init', '-b', 'main'); git_ok('add', '-A'); git_ok('commit', '-m', 'baseline', '--allow-empty')
         log('遊戲資料夾原本沒有 git，已建立 git 並把目前的檔案存成第一個版本（分支 main）')
     try:
@@ -909,6 +983,7 @@ def cmd_run(args):
     rounds = args.rounds or CFG['max_rounds']
     if not PROJECT.is_dir():
         sys.exit(f'找不到遊戲資料夾 {PROJECT}。請到介面的「設定」確認遊戲資料夾（flow.config.json 的 project_dir）。')
+    recover_note()                  # 上次被強制停止、受保護的檔案來不及還原：先改回來
     pre = gate_models()
     if not pre['ok']:
         print('遊戲整合階段被擋下（模型還沒準備好）：')
@@ -957,8 +1032,10 @@ def cmd_run(args):
             protected = Protect(protect_list)          # 開發者上工前才記下，你在兩輪之間改的檔案不會被誤還原
             guard = {'allow_dirs': [PROJECT], 'deny_files': [shots],          # 改遊戲資料夾以外、或鏡頭清單，在改之前就擋下
                      'hint': f"只能改遊戲資料夾（{CFG['project_dir']}）裡的程式；鏡頭清單 {CFG['shots_spec']} 是驗收標準，不能改。"}
-            dev_out = run_agent('dev', dev_prompt, PROJECT, 'default', CFG['dev_allowed_tools'], CFG['agent_timeout_sec'], dry, 'game_dev', guard)
-            reverted, added = protected.restore()
+            try:
+                dev_out = run_agent('dev', dev_prompt, PROJECT, 'default', CFG['dev_allowed_tools'], CFG['agent_timeout_sec'], dry, 'game_dev', guard)
+            finally:
+                reverted, added = protected.restore()  # 被 Ctrl+C 中斷也要還原
             (ws / 'messages' / f'r{rnd:02d}-dev.md').write_text(dev_out, 'utf-8')
             git_ok('add', '-A'); git_ok('commit', '-m', f'round {rnd}', '--allow-empty')
             diff = git_ok('diff', before, 'HEAD')
@@ -1123,11 +1200,16 @@ def cmd_gates(args):
         return 1
     br = gate_browser(ws)
     log('瀏覽器檢查：', '通過' if br['ok'] else '失敗'); [print('  -', e) for e in br['errors'] + br['violations']]
-    log('截圖：', [s['file'] for s in br['shots']]); log('幀時間：', br['perf']); log('效能關卡：', gate_perf(br)['note'])
-    for x in gate_extra():
+    gp = gate_perf(br)
+    log('截圖：', [s['file'] for s in br['shots']]); log('幀時間：', br['perf']); log('效能關卡：', '通過' if gp['ok'] else '失敗', gp['note'])
+    gx = gate_extra()
+    for x in gx:
         log('自訂檢查', x['cmd'], '通過' if x['rc'] == 0 else '失敗')
+        if x['rc'] != 0:
+            print(tail(x['output'], 1200))           # 失敗原因（例如架構檢查列出的檔案與行號）
     log('輸出資料夾：', ws)
-    return 0 if (br['ok'] and gm['ok']) else 1
+    # 過關條件跟做遊戲（run）一樣：模型、建置、瀏覽器、效能、自訂檢查全部通過
+    return 0 if (gm['ok'] and br['ok'] and gp['ok'] and all(x['rc'] == 0 for x in gx)) else 1
 
 
 def cmd_add_check(args):
@@ -1136,7 +1218,7 @@ def cmd_add_check(args):
         model_dir(args.model)
     with p.open('a', encoding='utf-8') as f:
         f.write(f"\n- {args.text}（{datetime.date.today()} 加入）")
-    log('已加入驗收清單：', p.relative_to(ROOT), '←', args.text)
+    log('已加入驗收清單：', rel(p), '←', args.text)    # rel：模型資料夾設在工具資料夾外面也能顯示
 
 
 def cmd_new_project(args):

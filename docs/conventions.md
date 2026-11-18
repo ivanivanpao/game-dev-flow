@@ -46,7 +46,7 @@ game-dev-flow/                  ← 工具本身
         │   │     human-feedback.md  ← 你對這個模型的意見（第一次在介面編輯時才建立）
         │   │     ref*.png／jpg／webp ← （選填）參考圖：開發者與視覺審查者每輪都會看；最多 4 張、每張 5MB 以內
         │   │     reopen.md     ←   （遊戲階段退件時自動產生）
-        │   └── _released/<名稱>/    ← 發布區：model.js、release.json（版本、sha256）、history.jsonl
+        │   └── _released/<名稱>/    ← 發布區：model.js、spec.md（發布當時的規格）、release.json（版本、sha256）、history.jsonl
         ├── <遊戲資料夾>/       ← 你的遊戲程式（名稱在新增專案時取，預設 game；設定的 project_dir），有自己的 git
         │     shots.json        ←   鏡頭清單：每張截圖怎麼擺場景、應該看到什麼
         └── workspace/          ← 執行時自動產生

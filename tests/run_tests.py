@@ -332,6 +332,16 @@ st5, _ = last_game_status()
 check('#3 上次沒收尾：留下的修改存進 auto/interrupted', '<!-- left over -->' in g('show', 'auto/interrupted:index.html'))
 check('#3 上次沒收尾：切回 main 再開始，結束後也在 main', st5['base'] == 'main' and g('rev-parse', '--abbrev-ref', 'HEAD') == 'main', (st5.get('base'), out[-400:]))
 
+# #21 只跑關卡（gates）：過關條件跟做遊戲一樣，自訂檢查失敗要印出原因
+cfg_txt = (PJ / 'flow.config.json').read_text('utf-8')
+rc, out = orch('gates')
+check('#21 只跑關卡：全部通過 → 回傳碼 0', rc == 0, out[-600:])
+c2 = json.loads(cfg_txt); c2['extra_checks'] = ['node -e "console.log(\'ARCH-FAIL-DETAIL\');process.exit(1)"']
+(PJ / 'flow.config.json').write_text(json.dumps(c2, ensure_ascii=False, indent=2), 'utf-8')
+rc, out = orch('gates')
+check('#21 只跑關卡：自訂檢查沒過 → 回傳碼不是 0，並印出失敗原因', rc != 0 and 'ARCH-FAIL-DETAIL' in out, out[-600:])
+(PJ / 'flow.config.json').write_text(cfg_txt, 'utf-8')
+
 # ---------- 做模型 E2E（乾跑）----------
 rc, out = orch('model', 'box', '--dry-run', '--rounds', '4')
 mruns = sorted((PJ / 'workspace').glob('model-box-*'))
@@ -340,6 +350,18 @@ check('#8 做模型：第 2 輪沒改動 → 沿用結果', len(mst['history']) 
 check('#7 做模型：判定卡住並寫明原因', mst['state'] == 'stalled' and mst.get('stall_reason'), mst)
 mres = json.loads((mruns[-1] / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))
 print('     （模型關卡實際結果：', 'WebGPU 可用、截圖', len(mres['shots']), '張' if mres['shots'] else f"沒有截圖，錯誤：{mres['errors'][:1]}", '）')
+
+# #18 上次被強制停止、來不及還原（模擬：拍了快照、開發者改了清單，程式就被結束）→ 下次開工先改回來，改之前的版本另存
+mcl = PJ / 'checks' / 'model-checklist.md'
+mcl_before = mcl.read_bytes()
+O.Protect(lambda: O.walk_files(O.ROOT))
+mcl.write_text('CHEAT', 'utf-8')
+rc, out = orch('model', 'axe', '--dry-run', '--rounds', '1')
+kept = list((SB / 'projects' / '.protect').glob('recovered-*/projects/t/checks/model-checklist.md'))
+check('#18 上次被強制停止：下次開工前把受保護的檔案改回來並說明', mcl.read_bytes() == mcl_before and '上次中途被停止' in out and 'model-checklist.md' in out, out[-600:])
+check('#18 改回來之前的版本另存一份（萬一是你停止後自己改的）', kept and kept[0].read_text('utf-8') == 'CHEAT', kept)
+check('#18 用完的快照會刪掉，快照本身不算受保護的檔案', not (SB / 'projects' / '.protect' / 'snapshot').exists()
+      and not any('.protect' in str(p) for p in O.walk_files(O.ROOT)))
 
 # 做模型（不乾跑，用假的 claude）：模型開發者的守門規則只准改這個模型的 model.js
 LOG.unlink(missing_ok=True)
@@ -351,6 +373,11 @@ check('#12 模型開發者有掛改檔守門員，只准改 model.js',
       and not mr.get('allow_dirs'), calls)
 REF_SECTION = '# 參考圖\n這個資料夾裡有人類提供的參考圖：'     # 協調器插進開發者提示詞的段落開頭（角色說明裡也有「# 參考圖」字樣，不能只比對標題）
 check('#13 沒有參考圖 → 開發者的提示詞沒有參考圖段落', calls and REF_SECTION not in calls[0]['prompt'], calls[0]['prompt'][-600:] if calls else calls)
+
+# #19 最近一次是乾跑通過 → 不能發布
+rc, out = orch('model', 'refcar', '--dry-run', '--rounds', '1')
+rc, out = orch('release', 'refcar')
+check('#19 最近一次是乾跑通過 → 不能發布', rc != 0 and 'dry-run' in out and not (PJ / 'models' / '_released' / 'refcar' / 'release.json').exists(), out[-400:])
 
 # 做模型（有參考圖）：開發者被告知要看參考圖；參考圖放進審查者隔離資料夾的 ref/，跟截圖分開
 LOG.unlink(missing_ok=True)
@@ -367,6 +394,41 @@ check('#13 開發者看過參考圖後，參考圖沒被動到', (PJ / 'models' 
 rstats = json.loads((sorted((PJ / 'workspace').glob('model-refcar-*'))[-1] / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))['stats']
 check('#15 小模型：地板維持每格 1 公尺', rstats and rstats.get('grid_cell') == 1, rstats)
 check('#15 審查者的 shots.md 開頭寫明地板每格幾公尺', visc and '地板方格每格 1 公尺' in (visc[0]['shots_md'] or ''), visc[0]['shots_md'] if visc else '')
+
+# #19 發布：通過之後 model.js、規格、參考圖有改動就不能發布；沒改才發布，並留一份發布當時的 spec.md
+rcd, rel_dir = PJ / 'models' / 'refcar', PJ / 'models' / '_released' / 'refcar'
+sj_before, mj_before = (rcd / 'spec.json').read_bytes(), (rcd / 'model.js').read_bytes()
+(rcd / 'spec.json').write_bytes(sj_before + b'\n')
+rc, out = orch('release', 'refcar')
+check('#19 通過後改了 spec.json → 不能發布，並說是哪個檔案', rc != 0 and 'spec.json' in out and not (rel_dir / 'release.json').exists(), out[-400:])
+(rcd / 'spec.json').write_bytes(sj_before)
+(rcd / 'ref-new.png').write_bytes(png1x1())
+rc, out = orch('release', 'refcar')
+check('#19 通過後新增參考圖 → 不能發布', rc != 0 and 'ref-new.png' in out and not (rel_dir / 'release.json').exists(), out[-400:])
+(rcd / 'ref-new.png').unlink()
+(rcd / 'model.js').write_bytes(mj_before + b'\n// x\n')
+rc, out = orch('release', 'refcar')
+check('#19 通過後改了 model.js → 不能發布', rc != 0 and 'model.js' in out and not (rel_dir / 'release.json').exists(), out[-400:])
+(rcd / 'model.js').write_bytes(mj_before)
+rc, out = orch('release', 'refcar')
+check('#19 都沒改 → 發布成功，發布當時的 spec.md 也存一份', rc == 0 and (rel_dir / 'release.json').exists() and (rel_dir / 'spec.md').read_text('utf-8') == '# 車', out[-400:])
+(rcd / 'spec.md').write_text('# 車（發布後改過）', 'utf-8')
+O.CFG['uses_models'] = ['refcar']; ctx = O.models_context(); O.CFG['uses_models'] = []
+(rcd / 'spec.md').write_text('# 車', 'utf-8')
+check('#19 遊戲開發者看到的是發布當時的規格，不是工坊裡之後改過的', '# 車' in ctx and '發布後改過' not in ctx, ctx[:300])
+
+# #20 模型從網路載入素材：在工坊就判不通過（不然會帶著問題發布，到遊戲階段才卡住）
+ed = PJ / 'models' / 'extimg'; ed.mkdir()
+(ed / 'model.js').write_text("fetch('https://example.invalid/wood.png').catch(() => {});\n" + (PJ / 'models' / 'box' / 'model.js').read_text('utf-8'), 'utf-8')
+(ed / 'spec.md').write_text('# 木箱', 'utf-8')
+(ed / 'spec.json').write_text(json.dumps({'name': 'extimg', 'checks': {}, 'views': [{'name': '1-iso', 'dir': [1, 0.6, 1], 'dist': 'fit', 'describe': '木箱'}]}), 'utf-8')
+rc, out = orch('model', 'extimg', '--rounds', '1')
+erun = sorted((PJ / 'workspace').glob('model-extimg-*'))[-1]
+eres = json.loads((erun / 'shots' / 'r01' / 'gate-result.json').read_text('utf-8'))
+efb = (erun / 'messages' / 'r01-feedback.md').read_text('utf-8')
+check('#20 模型從網路載入素材 → 工坊的關卡判不通過', not eres['ok'] and any('example.invalid' in v for v in eres.get('violations', [])), eres)
+check('#20 回饋告訴模型開發者是哪個網址', '外部資源' in efb and 'example.invalid' in efb, efb[:600])
+rm(ed)
 
 # 實際比例的大模型（300×180 公尺）：地板放大、每格 10 公尺，截圖沒被遠裁切面切掉
 LOG.unlink(missing_ok=True)
@@ -404,7 +466,9 @@ lab = PJ / 'workspace' / 'lab'; lab.mkdir(parents=True, exist_ok=True)
         const x = await fetch('/api/overview', {headers: {'X-Token': t}}); r.api = 'reached ' + x.status; } catch (e) { r.api = 'blocked'; }
   window.__r = r; })();
 </script></body></html>""", 'utf-8')
-srv = subprocess.Popen([PY, str(SB / 'gui' / 'server.py'), '--no-browser', '--port', '8799'], cwd=SB, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=ENV)
+# FAKE_SCENARIO=model_slow：介面啟動的工作裡，假開發者會偷改清單後一直不結束（測「按停止」用；其他介面測試不會啟動工作）
+srv = subprocess.Popen([PY, str(SB / 'gui' / 'server.py'), '--no-browser', '--port', '8799'], cwd=SB, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                       env=dict(ENV, FAKE_SCENARIO='model_slow'))
 try:
     port = int(re.search(r'127\.0\.0\.1:(\d+)', srv.stdout.readline()).group(1))
     html = urllib.request.urlopen(f'http://127.0.0.1:{port}/').read().decode('utf-8')
@@ -444,6 +508,40 @@ try:
     code_, c_ = api('/api/config')
     check('#14 介面的設定頁拿到的是合併後的設定（少的項目有預設值）', code_ == 200 and c_.get('model_viewport') == TPL_CFG['model_viewport'], c_)
     rm(PJ / 'agents.local')
+
+    # #22 介面存設定：只寫入改過的項目，你檔案裡沒寫的項目（model_viewport、models.model_code）繼續用工具的預設值
+    raw_before = (PJ / 'flow.config.json').read_text('utf-8')
+    code_, _ = api('/api/config', {'changes': {'max_rounds': 7, 'perf.target_avg_ms': 20}})
+    raw_ = json.loads((PJ / 'flow.config.json').read_text('utf-8'))
+    check('#22 介面存設定：只寫入改過的項目，沒動的項目不會被寫進設定檔',
+          code_ == 200 and raw_['max_rounds'] == 7 and raw_['perf']['target_avg_ms'] == 20 and 'model_viewport' not in raw_ and 'model_code' not in raw_['models'], raw_)
+    code_, _ = api('/api/newmodel', {'name': 'gm1', 'add_to_uses': True})
+    raw_ = json.loads((PJ / 'flow.config.json').read_text('utf-8'))
+    check('#22 新增模型並加進遊戲用到的模型：只改 uses_models', code_ == 200 and raw_['uses_models'] == ['gm1'] and 'model_viewport' not in raw_, raw_)
+    check('#22 設定項目名稱不合法 → 拒絕，不存檔', api('/api/config', {'changes': {'a..b': 1}})[0] == 400 and api('/api/config', {'config': {}})[0] == 400)
+    (PJ / 'flow.config.json').write_text(raw_before, 'utf-8'); rm(PJ / 'models' / 'gm1')
+
+    # #23 名稱有引號、括號的資料夾（可能是 AI 用 node 建的）不會出現在介面上，避免變成網頁裡的程式碼
+    bad_m, bad_r = PJ / 'models' / "x'),alert(1),('", PJ / 'workspace' / "r'),alert(1),('"
+    bad_m.mkdir(); (bad_m / 'spec.json').write_text('{}', 'utf-8'); bad_r.mkdir()
+    ov_, runs_ = api('/api/overview')[1], api('/api/runs')[1]
+    check('#23 名稱有引號、括號的模型資料夾、紀錄資料夾不會出現在介面上',
+          ov_ and runs_ is not None and all("'" not in m['name'] for m in ov_['models']) and all("'" not in r['id'] for r in runs_), (ov_ and [m['name'] for m in ov_['models']], runs_))
+    rm(bad_m); rm(bad_r)
+
+    # #18 介面按「停止」：協調器被強制結束、來不及還原 → 介面馬上照快照把受保護的檔案改回來
+    mcl_before = mcl.read_bytes()
+    api('/api/cmd', {'cmd': 'model', 'name': 'axe', 'rounds': 1})
+    for _ in range(120):                       # 等假開發者偷改清單（最多 60 秒）
+        if mcl.read_bytes() != mcl_before:
+            break
+        time.sleep(0.5)
+    tampered = mcl.read_bytes() != mcl_before
+    code_, s_ = api('/api/job/stop', {})
+    j_ = api('/api/job')[1]
+    check('#18 介面按停止：開發者這一輪改過的受保護檔案馬上改回來，並寫進紀錄',
+          tampered and s_ and s_.get('stopped') and mcl.read_bytes() == mcl_before and any('已把開發者這一輪改過' in l for l in j_['lines']),
+          (tampered, s_, j_ and j_['lines'][-5:]))
     code_, ov_ = api('/api/overview')
     check('#16 介面總覽帶出目前專案與專案清單', code_ == 200 and ov_['project'] == 't' and ov_['projects'] == ['t'], ov_ and ov_.get('projects'))
     code_, r_ = api('/api/project/new', {'name': 't2', 'game': 'g2'})
@@ -458,9 +556,15 @@ try:
         br = p.chromium.launch(headless=True, channel='chromium', args=['--enable-unsafe-webgpu'])
         pg = br.new_page(); pg.goto(f'http://127.0.0.1:{port}/ws/lab/t.html?t={token}')
         pg.wait_for_function('window.__r', timeout=20000); r = pg.evaluate('window.__r')
-        pg2 = br.new_page(); pg2.goto(f'http://127.0.0.1:{port}/')
+        pg2 = br.new_page(); perrs = []; pg2.on('pageerror', lambda e: perrs.append(str(e)))
+        pg2.goto(f'http://127.0.0.1:{port}/')
         ok_api = pg2.evaluate(f"fetch('/api/overview', {{headers: {{'X-Token': '{token}'}}}}).then(x => x.status)")
+        # 按鈕改成從 data- 屬性讀名稱之後，點模型卡片照常能選到模型
+        pg2.wait_for_selector('.mcard[data-name="box"]', state='attached', timeout=15000)
+        pg2.evaluate("document.querySelector('.mcard[data-name=\"box\"]').click()")
+        cur_model = pg2.evaluate('CUR_MODEL')
         br.close()
+    check('#23 介面的模型卡片從 data- 屬性讀名稱，點了照常選到模型、頁面沒有錯誤', cur_model == 'box' and not perrs, (cur_model, perrs))
     check('#4 隔離後的頁面呼叫不到介面 API', r['api'] == 'blocked' and r['origin'] == 'null', r)
     check('#4 對照組：介面本身照常能呼叫 API', ok_api == 200, ok_api)
     check('#4 隔離後的頁面仍是安全環境、WebGPU 仍可用（檢視器照常能跑）', r['secure'] and r['gpu'], r)
@@ -491,6 +595,9 @@ check('#16 新增專案：遊戲資料夾用你取的名字，設定跟著指過
 check('#16 新增專案：遊戲資料夾有 shots.json 範本、已 git init、有 models/_released/',
       (fp / 'forest-rpg' / 'shots.json').read_bytes() == (REAL / 'templates' / 'shots.json').read_bytes()
       and (fp / 'forest-rpg' / '.git').is_dir() and (fp / 'models' / '_released').is_dir(), out)
+gi = (fp / 'forest-rpg' / '.gitignore').read_text('utf-8') if (fp / 'forest-rpg' / '.gitignore').exists() else ''
+check('#16 新增專案：遊戲資料夾有 .gitignore，node_modules/、dist/ 不會被每輪的 commit 存進去',
+      'node_modules/' in gi.splitlines() and 'dist/' in gi.splitlines(), gi)
 check('#16 新增專案後就是目前專案，status 照常能跑',
       (fresh / 'projects' / '.current').read_text('utf-8') == 'demo' and fo('status')[0] == 0, fo('status'))
 rc, out = fo('new-project', 'demo')
@@ -507,6 +614,14 @@ check('#16 指定不存在的專案 → 拒絕並列出現有專案', rc != 0 an
 (fp / 'human-feedback.md').unlink()
 rc, out = fo('status')
 check('#16 專案缺了檔案 → 從範本補上並告訴你', rc == 0 and (fp / 'human-feedback.md').exists() and 'human-feedback.md' in out, out)
+
+# #24 模型資料夾設在工具資料夾外面：add-check 照常成功（以前會先寫入規則、再印路徑時當掉，看起來像失敗）
+ext = TMP / 'ext-models'; (ext / 'm1').mkdir(parents=True); (ext / 'm1' / 'spec.json').write_text('{}', 'utf-8')
+dcfg = json.loads((fp / 'flow.config.json').read_text('utf-8')); dcfg['models_dir'] = str(ext)
+(fp / 'flow.config.json').write_text(json.dumps(dcfg, ensure_ascii=False, indent=2), 'utf-8')
+rc, out = fo('add-check', '刀刃要亮', '--model', 'm1', '--project', 'demo')
+check('#24 模型資料夾在工具資料夾外面：add-check 照常成功、規則只寫一次',
+      rc == 0 and 'Traceback' not in out and (ext / 'm1' / 'checklist.md').read_text('utf-8').count('刀刃要亮') == 1, out)
 
 # ---------- #17 架構檢查（templates/checks/arch-check.mjs）----------
 ARCH = SB / 'templates' / 'checks' / 'arch-check.mjs'
