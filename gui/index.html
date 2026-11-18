@@ -5,110 +5,280 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>遊戲開發流程</title>
 <style>
-:root{--bg:#f4f5f7;--panel:#fff;--text:#1d2329;--muted:#65707c;--line:#dde1e6;--accent:#2f6fde;--accent-text:#fff;--ok:#1f8a4c;--warn:#b26a00;--bad:#c0392b;--code:#f0f2f5;--sel:#e7effc}
-@media (prefers-color-scheme: dark){:root{--bg:#15181c;--panel:#1e2228;--text:#e4e7eb;--muted:#9aa4ae;--line:#323840;--accent:#5b8ff0;--accent-text:#fff;--ok:#4cc27d;--warn:#e6a23c;--bad:#ef6b5b;--code:#262b32;--sel:#26354d}}
+/* 配色：預設深色（遊戲引擎編輯器風），右上角可切換成淺色，選擇記在瀏覽器裡 */
+:root{color-scheme:dark;
+  --chrome:#1a1d22;--bg:#141619;--panel:#1e2228;--panel-2:#252a31;--raised:#2b3038;--hover:#323843;
+  --line:#2c3139;--line-strong:#3a404a;--text:#e2e5e9;--muted:#8c95a1;--faint:#5f6874;
+  --accent:#3fc1c9;--accent-text:#04211f;--accent-soft:rgba(63,193,201,.13);
+  --ok:#5cc985;--ok-soft:rgba(92,201,133,.13);--warn:#e8b04a;--warn-soft:rgba(232,176,74,.13);--bad:#ef6b61;--bad-soft:rgba(239,107,97,.13);
+  --code:#101215;--shadow:0 1px 2px rgba(0,0,0,.35);--sel:var(--accent-soft)}
+:root[data-theme=light]{color-scheme:light;
+  --chrome:#f7f8fa;--bg:#eceff3;--panel:#ffffff;--panel-2:#f4f6f8;--raised:#ffffff;--hover:#eef1f4;
+  --line:#dde1e6;--line-strong:#c8ced6;--text:#1b1f24;--muted:#5d6670;--faint:#98a0aa;
+  --accent:#0b8793;--accent-text:#ffffff;--accent-soft:rgba(11,135,147,.10);
+  --ok:#1c8447;--ok-soft:rgba(28,132,71,.10);--warn:#a46200;--warn-soft:rgba(164,98,0,.10);--bad:#c0392b;--bad-soft:rgba(192,57,43,.09);
+  --code:#f3f5f7;--shadow:0 1px 2px rgba(20,30,40,.08)}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif;padding-bottom:46px}
-header{display:flex;align-items:center;gap:12px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:17px;margin:0}
-nav{display:flex;gap:4px;padding:8px 18px 0;flex-wrap:wrap}
-nav button{border:1px solid var(--line);border-bottom:none;background:transparent;color:var(--muted);padding:7px 14px;border-radius:8px 8px 0 0;cursor:pointer;font:inherit}
-nav button.on{background:var(--panel);color:var(--text);font-weight:600}
-main{background:var(--panel);border-top:1px solid var(--line);min-height:calc(100vh - 140px);padding:18px}
-section{display:none}section.on{display:block}
-h2{font-size:16px;margin:0 0 10px}h3{font-size:14px;margin:18px 0 8px}
-.card{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--panel)}
+[hidden]{display:none !important}
+html,body{height:100%}
+/* 整頁版面：上方頂列、左側導覽、中間主畫面、下方輸出面板 */
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Segoe UI",system-ui,"Microsoft JhengHei UI","Microsoft JhengHei","Noto Sans TC",sans-serif;
+  display:grid;grid-template-columns:212px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;grid-template-areas:"top top" "side main" "con con";height:100vh;height:100dvh;overflow:hidden}
+a{color:var(--accent)}
+code{font:12.5px/1.4 "Cascadia Code","Cascadia Mono",Consolas,monospace;background:var(--code);border:1px solid var(--line);padding:0 5px;border-radius:4px}
+svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.spacer{flex:1}
+
+/* 頂列 */
+header{grid-area:top;display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--chrome);border-bottom:1px solid var(--line);flex-wrap:wrap;min-height:52px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:6px}
+.brand .logo{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.brand .logo svg{width:18px;height:18px}
+.brand h1{font-size:15px;margin:0;font-weight:650;line-height:1.25}
+.brand small{display:block;font:11px/1.2 "Cascadia Code",Consolas,monospace;color:var(--faint)}
+.proj{display:flex;align-items:center;gap:7px;padding-left:14px;border-left:1px solid var(--line);color:var(--muted);font-size:13px}
+.proj select{min-width:150px}
+
+/* 左側導覽 */
+#side{grid-area:side;background:var(--chrome);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px;padding:12px 8px;overflow:auto}
+#nav{display:flex;flex-direction:column;gap:2px}
+.nav-label{font-size:11px;color:var(--faint);letter-spacing:.8px;padding:12px 10px 4px}
+.nav-label:first-child{padding-top:2px}
+#nav button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;color:var(--muted);padding:7px 10px;border-radius:7px;cursor:pointer;font:inherit;text-align:left;position:relative}
+#nav button:hover{background:var(--hover);color:var(--text)}
+#nav button.on{background:var(--accent-soft);color:var(--text);font-weight:600}
+#nav button.on::before{content:"";position:absolute;left:-8px;top:7px;bottom:7px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+#nav button.on svg{color:var(--accent)}
+.side-foot{margin-top:auto;border-top:1px solid var(--line);padding:12px 4px 2px}
+.side-foot .nav-label{padding:0 6px 8px}
+#env{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:0 4px}
+
+/* 主畫面 */
+main{grid-area:main;overflow:auto;padding:24px 28px 36px}
+section{display:none;max-width:1240px}section.on{display:block}
+.page-head{margin-bottom:18px}
+.page-head h2{font-size:20px;margin:0 0 3px;font-weight:650}
+.page-head p{margin:0;color:var(--muted);font-size:13px;max-width:860px}
+h2{font-size:15px;margin:0 0 12px;font-weight:650}
+h3{font-size:13.5px;margin:18px 0 8px;font-weight:650}
+.card{border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px;background:var(--panel);box-shadow:var(--shadow)}
+.card>h2:first-child,.card>h3:first-child{margin-top:0}
+.card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.card-head h2{margin:0}
+.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px;align-items:start}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.cols{display:grid;grid-template-columns:220px 1fr;gap:16px}
-@media (max-width:800px){.cols{grid-template-columns:1fr}}
-button.b{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 12px;border-radius:7px;cursor:pointer;font:inherit}
-button.b:hover{border-color:var(--accent)}
-button.p{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.cols{display:grid;grid-template-columns:250px minmax(0,1fr);gap:18px;align-items:start}
+.empty{border:1px dashed var(--line-strong);border-radius:10px;padding:48px 20px;text-align:center;color:var(--muted)}
+
+/* 按鈕與輸入框 */
+button.b{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--raised);color:var(--text);padding:6px 13px;border-radius:7px;cursor:pointer;font:inherit;font-size:13.5px;line-height:1.5;transition:background .12s,border-color .12s}
+button.b:hover{background:var(--hover);border-color:var(--faint)}
+button.b:focus-visible,#nav button:focus-visible,.mcard:focus-visible,.stage:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.p{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:600}
+button.p:hover{background:var(--accent);border-color:var(--accent);filter:brightness(1.08)}
 button.d{color:var(--bad)}
-button:disabled{opacity:.5;cursor:not-allowed}
-input[type=text],input[type=number],textarea,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 9px}
+button.d:hover{border-color:var(--bad);background:var(--bad-soft)}
+button.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+button.ghost:hover{color:var(--text)}
+button:disabled,button:disabled:hover{opacity:.45;cursor:not-allowed;filter:none}
+input[type=text],input[type=number],textarea,select{font:inherit;color:var(--text);background:var(--panel-2);border:1px solid var(--line-strong);border-radius:7px;padding:6px 9px}
+input[type=text]:focus,input[type=number]:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 input[type=number]{width:80px}
-textarea.ed{width:100%;min-height:420px;font:13px/1.55 Consolas,"Cascadia Mono",monospace;resize:vertical;tab-size:2}
+input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;vertical-align:-2px;margin:0 4px 0 0}
+select{padding:5px 8px}
+textarea.ed{display:block;width:100%;min-height:440px;font:13px/1.6 "Cascadia Code","Cascadia Mono",Consolas,monospace;resize:vertical;tab-size:2;background:var(--code)}
 .muted{color:var(--muted)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
-.tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;border:1px solid var(--line)}
-.tag.ok{border-color:var(--ok)}.tag.warn{border-color:var(--warn)}.tag.bad{border-color:var(--bad)}
-table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:13px}
-.list button{display:block;width:100%;text-align:left;margin-bottom:4px}
-.list button.on{background:var(--sel);border-color:var(--accent)}
-.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
-.tabs button{font-size:13px;padding:4px 10px}
-.tabs button.on{background:var(--sel);border-color:var(--accent)}
-.help{font-size:13px;color:var(--muted);margin:4px 0 8px}
-.notice{padding:8px 12px;border-radius:8px;border:1px solid var(--warn);margin:8px 0;font-size:13px}
-.notice.bad{border-color:var(--bad)}
-.md{line-height:1.7}.md pre{background:var(--code);padding:10px;border-radius:8px;overflow:auto}.md code{background:var(--code);padding:1px 5px;border-radius:4px}.md pre code{padding:0;background:none}
-.md table{width:auto}.md blockquote{margin:0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}
-.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.shots figure{margin:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
-.shots img{width:100%;display:block;cursor:zoom-in}.shots figcaption{padding:6px 8px;font-size:12px}
-#console{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);z-index:5}
-#console .bar{display:flex;gap:10px;align-items:center;padding:8px 18px;cursor:pointer}
-#console pre{margin:0;max-height:38vh;overflow:auto;padding:8px 18px 12px;font:12px/1.5 Consolas,monospace;display:none;white-space:pre-wrap}
+
+/* 狀態標籤、狀態點 */
+.tag{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:999px;font-size:12px;line-height:1.6;background:var(--panel-2);color:var(--muted);border:1px solid var(--line);white-space:nowrap;vertical-align:1px}
+.tag.ok,.tag.warn,.tag.bad{border-color:transparent}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}.tag.warn{background:var(--warn-soft);color:var(--warn)}.tag.bad{background:var(--bad-soft);color:var(--bad)}
+.tag.ok::before,.tag.warn::before,.tag.bad::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.acc{background:var(--accent)}
+
+/* 表格、清單、分頁 */
+table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;background:var(--panel-2)}
+.list{display:flex;flex-direction:column;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;margin-bottom:10px}
+.list:empty{display:none}
+.list>p{margin:8px 10px}
+.list button.b{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;width:100%;text-align:left;border-color:transparent;background:transparent;padding:7px 10px}
+.list button.b:hover{background:var(--hover)}
+.list button.on,.list button.on:hover{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.li-name{font-weight:600;margin-right:auto;overflow-wrap:anywhere}
+.li-sub{width:100%;font-size:12px;color:var(--muted)}
+.tabs{display:flex;gap:2px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.tabs button.b{font-size:12.5px;padding:6px 12px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;color:var(--muted);margin-bottom:-1px}
+.tabs button.b:hover{background:var(--hover);color:var(--text)}
+.tabs button.on,.tabs button.on:hover{color:var(--text);border-bottom-color:var(--accent);background:var(--panel-2)}
+.help{font-size:13px;color:var(--muted);margin:4px 0 10px}
+.notice{padding:9px 13px;border-radius:8px;border-left:3px solid var(--warn);background:var(--warn-soft);margin:8px 0;font-size:13px}
+.notice.bad{border-left-color:var(--bad);background:var(--bad-soft)}
+
+/* 總覽：下一步、流程進度、模型卡片 */
+#ov-next ul{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
+#ov-next li{padding:8px 12px;border-left:3px solid var(--line-strong);background:var(--panel-2);border-radius:0 7px 7px 0;color:var(--text)}
+#ov-next li.ok{border-left-color:var(--ok)}#ov-next li.warn{border-left-color:var(--warn)}#ov-next li.bad{border-left-color:var(--bad)}
+.flow{display:flex;align-items:stretch;margin-bottom:14px}
+.stage{flex:1;min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:12px;align-items:center;text-align:left;padding:12px 14px;border:1px solid var(--line);background:var(--panel);border-radius:10px;color:var(--text);font:inherit;cursor:pointer;box-shadow:var(--shadow)}
+.stage:hover{background:var(--panel-2);border-color:var(--line-strong)}
+.stage-n{grid-row:1/3;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line-strong);color:var(--panel);font-size:14px;font-weight:700}
+.stage-t{font-weight:650}
+.stage-d{font-size:12.5px;color:var(--muted)}
+.stage.active{border-color:var(--accent)}
+.stage.active .stage-n{border-color:var(--accent);background:var(--accent-soft)}
+.stage.active .stage-n::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.stage.done .stage-n{border-color:var(--ok);background:var(--ok)}
+.stage-arrow{flex:none;width:24px;align-self:center;height:2px;background:var(--line-strong);position:relative}
+.stage-arrow::after{content:"";position:absolute;right:-2px;top:-4px;border:5px solid transparent;border-right:0;border-left:6px solid var(--line-strong)}
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.mcard{display:flex;flex-direction:column;gap:7px;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);color:var(--text);font:inherit;cursor:pointer}
+.mcard:hover{border-color:var(--accent)}
+.mcard-top{display:flex;align-items:center;gap:8px}
+.mname{font-weight:650;font-size:14.5px;margin-right:auto;overflow-wrap:anywhere}
+.mrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px}
+.mrow .k{color:var(--muted);width:34px;flex:none;font-size:12px}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 18px;margin:0;align-items:baseline}
+.kv dt{color:var(--muted);font-size:12.5px}.kv dd{margin:0}
+
+/* 模型頁：三個步驟並排 */
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.steps>.card{margin:0;display:flex;flex-direction:column;gap:10px}
+.step-h{display:flex;align-items:center;gap:10px}
+.step-h h3{margin:0}
+.step-n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-size:12.5px;font-weight:700;flex:none}
+.steps .help{margin:0}
+.stack{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.push{margin-top:auto}
+
+/* 報告內文（Markdown）與截圖 */
+.md{line-height:1.75}.md h2,.md h3,.md h4{margin:18px 0 8px}.md>h2:first-child{margin-top:0}
+.md pre{background:var(--code);border:1px solid var(--line);padding:10px 12px;border-radius:8px;overflow:auto}
+.md pre code{padding:0;background:none;border:0}
+.md table{width:auto;margin:8px 0}.md ul{padding-left:22px}.md blockquote{margin:0;padding-left:12px;border-left:3px solid var(--line-strong);color:var(--muted)}
+#r-detail>h2{font:600 15px/1.4 "Cascadia Code",Consolas,monospace;margin-bottom:14px;overflow-wrap:anywhere}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.shots figure{margin:0;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel-2)}
+.shots img{width:100%;display:block;cursor:zoom-in;background:#0b0c0e}
+.shots figcaption{padding:7px 10px;font-size:12px;border-top:1px solid var(--line)}
+
+/* 下方輸出面板 */
+#console{grid-area:con;background:var(--chrome);border-top:1px solid var(--line)}
+#console .bar{display:flex;gap:10px;align-items:center;padding:7px 16px;cursor:pointer;font-size:13px;user-select:none;min-height:40px}
+#console .bar:hover{background:var(--hover)}
+#console.running .dot{background:var(--warn);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(232,176,74,.55)}70%{box-shadow:0 0 0 7px rgba(232,176,74,0)}100%{box-shadow:0 0 0 0 rgba(232,176,74,0)}}
+@media (prefers-reduced-motion:reduce){#console.running .dot{animation:none}}
+#console .chev{color:var(--muted);transition:transform .15s}
+#console.open .chev{transform:rotate(180deg)}
+#console pre{margin:0;max-height:36vh;overflow:auto;padding:10px 16px 14px;font:12px/1.55 "Cascadia Code",Consolas,monospace;display:none;white-space:pre-wrap;background:var(--code);border-top:1px solid var(--line);color:var(--text)}
 #console.open pre{display:block}
-.form{display:grid;grid-template-columns:200px 1fr;gap:8px 14px;align-items:center}
-.form .h{grid-column:1/-1;font-weight:600;margin-top:10px;border-bottom:1px solid var(--line);padding-bottom:4px}
-.form .note{grid-column:2;font-size:12px;color:var(--muted);margin-top:-6px}
-@media (max-width:700px){.form{grid-template-columns:1fr}.form .note{grid-column:1}}
-dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:18px;max-width:92vw}
-dialog::backdrop{background:rgba(0,0,0,.4)}
+
+/* 設定表單與對話框 */
+.form{display:grid;grid-template-columns:220px minmax(0,1fr);gap:9px 16px;align-items:center}
+.form .h{grid-column:1/-1;font-weight:650;font-size:12px;letter-spacing:.6px;color:var(--accent);margin-top:16px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.form .h:nth-child(2){margin-top:0}
+.form .note{grid-column:2;font-size:12px;color:var(--muted);margin-top:-5px}
+dialog{border:1px solid var(--line-strong);border-radius:12px;background:var(--panel);color:var(--text);padding:20px 22px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+dialog::backdrop{background:rgba(5,6,8,.6)}
+dialog h2{margin-bottom:14px}
+dialog .row{margin-top:14px}
+#zoom{padding:0;background:#000}
 #zoom img{max-width:88vw;max-height:84vh;display:block}
+
+/* 窄螢幕：導覽改成橫向一排 */
+@media (max-width:1050px){.steps,.grid2{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:820px){
+  body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr) auto;grid-template-areas:"top" "side" "main" "con"}
+  #side{flex-direction:row;align-items:center;padding:6px 10px;border-right:0;border-bottom:1px solid var(--line);overflow-x:auto}
+  #nav{flex-direction:row}
+  #nav button{width:auto;white-space:nowrap}
+  #nav button.on::before{display:none}
+  .nav-label,.side-foot{display:none}
+  main{padding:16px}
+  .cols{grid-template-columns:minmax(0,1fr)}
+  .flow{flex-direction:column;gap:8px}.stage-arrow{display:none}
+  .form{grid-template-columns:minmax(0,1fr)}.form .note{grid-column:1}
+  .proj{border-left:0;padding-left:0}
+}
 </style>
+<script>
+// 在畫面出現前套用上次選的配色，避免先閃一下深色再變淺色
+try { const t = localStorage.getItem('gdf-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 </head>
 <body>
 <header>
-  <h1>遊戲開發流程</h1>
-  <label>專案 <select id="proj" onchange="switchProject(this.value)"></select></label>
+  <div class="brand">
+    <span class="logo"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></span>
+    <div><h1>遊戲開發流程</h1><small>game-dev-flow</small></div>
+  </div>
+  <label class="proj">專案 <select id="proj" onchange="switchProject(this.value)"></select></label>
   <button class="b" onclick="document.getElementById('dlg-proj').showModal()">＋ 新增專案</button>
-  <span id="env"></span>
-  <span style="flex:1"></span>
-  <button class="b" onclick="refreshAll()">重新整理</button>
+  <span class="spacer"></span>
+  <button class="b ghost" id="theme-btn" onclick="toggleTheme()" title="切換深色／淺色"></button>
+  <button class="b" onclick="refreshAll()"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>重新整理</button>
 </header>
-<nav id="nav">
-  <button data-tab="overview" class="on">總覽</button>
-  <button data-tab="models">① 模型工坊</button>
-  <button data-tab="game">② 遊戲整合</button>
-  <button data-tab="runs">執行紀錄</button>
-  <button data-tab="settings">設定</button>
-  <button data-tab="advanced">進階</button>
-</nav>
+
+<aside id="side">
+  <nav id="nav">
+    <div class="nav-label">流程</div>
+    <button data-tab="overview" class="on"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>總覽</button>
+    <button data-tab="models"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>① 模型工坊</button>
+    <button data-tab="game"><svg class="i" viewBox="0 0 24 24"><path d="M7.5 7h9a4.5 4.5 0 0 1 4.5 4.5v1.8a2.7 2.7 0 0 1-4.9 1.6L15 13.5H9l-1.1 1.4A2.7 2.7 0 0 1 3 13.3v-1.8A4.5 4.5 0 0 1 7.5 7z"/><path d="M8 9.5v3M6.5 11h3M15.5 10h.01M17.5 12h.01"/></svg>② 遊戲整合</button>
+    <div class="nav-label">紀錄與設定</div>
+    <button data-tab="runs"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>執行紀錄</button>
+    <button data-tab="settings"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>設定</button>
+    <button data-tab="advanced"><svg class="i" viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/></svg>進階</button>
+  </nav>
+  <div class="side-foot"><div class="nav-label">環境</div><div id="env"></div></div>
+</aside>
+
 <main>
   <!-- 總覽 -->
   <section id="overview" class="on">
+    <div class="page-head"><h2>總覽</h2><p>模型先在工坊做完、通過檢查，你確認發布後遊戲才能用；遊戲由 AI 在獨立分支上修改，最後由你親自玩過再合併。</p></div>
     <div id="ov-error"></div>
-    <div class="card"><h2>下一步</h2><div id="ov-next"></div></div>
-    <div class="card"><h2>模型</h2><div id="ov-models"></div></div>
-    <div class="card"><h2>遊戲</h2><div id="ov-game"></div></div>
+    <div id="ov-body" hidden>
+      <div class="flow" id="ov-flow"></div>
+      <div class="grid2">
+        <div class="card"><h2>下一步</h2><div id="ov-next"></div></div>
+        <div class="card"><h2>遊戲</h2><div id="ov-game"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>模型</h2><span class="spacer"></span><button class="b" onclick="document.getElementById('dlg-new').showModal()">＋ 新增模型</button></div>
+        <div id="ov-models"></div>
+      </div>
+    </div>
   </section>
 
   <!-- 模型工坊 -->
   <section id="models">
+    <div class="page-head"><h2>① 模型工坊</h2><p>每個模型獨立製作：AI 寫 model.js → 客觀檢查與多角度截圖 → 只看截圖的 AI 審查。通過後你用檢視器看過，滿意才發布。</p></div>
     <div class="cols">
       <div>
         <div class="list" id="m-list"></div>
-        <button class="b" style="width:100%" onclick="document.getElementById('dlg-new').showModal()">＋ 新增模型</button>
+        <button class="b" style="width:100%;justify-content:center" onclick="document.getElementById('dlg-new').showModal()">＋ 新增模型</button>
       </div>
-      <div id="m-detail"><p class="muted">從左邊選一個模型。</p></div>
+      <div id="m-detail"><div class="empty">從左邊選一個模型。</div></div>
     </div>
   </section>
 
   <!-- 遊戲整合 -->
   <section id="game">
+    <div class="page-head"><h2>② 遊戲整合</h2><p>遊戲只能用已發布的模型。AI 只在新分支 <code>auto/&lt;時間&gt;</code> 上改你的遊戲程式，結束後遊戲資料夾會切回你原本的分支，滿意才由你合併。</p></div>
     <div id="g-status"></div>
     <div class="card">
-      <h2>執行</h2>
+      <div class="card-head"><h2>執行</h2></div>
       <div class="row">
         最多 <input type="number" id="g-rounds" min="1" max="50" placeholder="設定值"> 輪
         <label><input type="checkbox" id="g-dry"> 乾跑（不呼叫 AI，只測流程）</label>
-        <button class="b p" onclick="runGame()">開始做遊戲</button>
+        <span class="spacer"></span>
         <button class="b" onclick="cmd({cmd:'gates'})">只跑關卡（不呼叫 AI）</button>
+        <button class="b p" onclick="runGame()">開始做遊戲</button>
       </div>
-      <p class="muted">「開始做遊戲」：AI 反覆修改你的遊戲程式，直到通過或跑滿輪數。AI 只在新分支 <code>auto/&lt;時間&gt;</code> 上改，結束後遊戲資料夾會切回你原本的分支。開始前遊戲資料夾不能有還沒 commit 的修改。</p>
+      <p class="help" style="margin-top:10px">AI 會反覆修改，直到通過或跑滿輪數。開始前遊戲資料夾不能有還沒 commit 的修改。</p>
       <h3>新增一條遊戲驗收規則</h3>
       <div class="row"><input type="text" id="g-check" style="flex:1;min-width:240px" placeholder="寫成看圖就能判斷的一句話，例如：樹不能懸空">
         <button class="b" onclick="addCheck(null,'g-check')">加入清單</button></div>
@@ -118,32 +288,34 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
   <!-- 執行紀錄 -->
   <section id="runs">
+    <div class="page-head"><h2>執行紀錄</h2><p>每次做模型、做遊戲、只跑關卡的報告、每一輪的訊息與截圖。</p></div>
     <div class="cols">
       <div class="list" id="r-list"></div>
-      <div id="r-detail"><p class="muted">從左邊選一筆紀錄。</p></div>
+      <div id="r-detail"><div class="empty">從左邊選一筆紀錄。</div></div>
     </div>
   </section>
 
   <!-- 設定 -->
   <section id="settings">
+    <div class="page-head"><h2>設定</h2><p>目前專案的流程設定，存在專案資料夾的 flow.config.json。</p></div>
     <div class="card">
       <div class="form" id="s-form"></div>
-      <div class="row" style="margin-top:14px"><button class="b p" onclick="saveSettings()">儲存設定</button><span id="s-msg" class="muted"></span></div>
+      <div class="row" style="margin-top:18px"><button class="b p" onclick="saveSettings()">儲存設定</button><span id="s-msg" class="muted"></span></div>
     </div>
   </section>
 
   <!-- 進階 -->
   <section id="advanced">
-    <p class="help">這些是流程本身的檔案。通常不用改。AI 角色指令（agents/）是工具內建的、只能看；想調整某個角色，把它複製到 <code>agents.local/</code> 同名檔案，就會出現在這裡讓你改。</p>
+    <div class="page-head"><h2>進階</h2><p>這些是流程本身的檔案，通常不用改。AI 角色指令（agents/）是工具內建的、只能看；想調整某個角色，把它複製到 <code>agents.local/</code> 同名檔案，就會出現在這裡讓你改。</p></div>
     <div class="card"><div id="a-editor"></div></div>
   </section>
 </main>
 
 <div id="console">
-  <div class="bar" onclick="this.parentNode.classList.toggle('open')">
-    <b>工作</b><span id="c-state" class="muted">沒有工作在跑</span><span style="flex:1"></span>
+  <div class="bar" onclick="this.parentNode.classList.toggle('open')" title="點這裡展開／收合">
+    <span class="dot"></span><b>輸出</b><span id="c-state" class="muted">沒有工作在跑</span><span class="spacer"></span>
     <button class="b d" id="c-stop" style="display:none" onclick="event.stopPropagation();stopJob()">停止</button>
-    <span class="muted">點這裡展開／收合</span>
+    <svg class="i chev" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>
   </div>
   <pre id="c-log"></pre>
 </div>
@@ -283,7 +455,8 @@ window.addEventListener('beforeunload', e => { if ([...document.querySelectorAll
 
 // ---------- 分頁切換 ----------
 $('nav').onclick = e => {
-  const t = e.target.dataset.tab; if (!t) return;
+  const btn = e.target.closest('button[data-tab]'); if (!btn) return;     // 點到按鈕裡的圖示也算點到按鈕
+  const t = btn.dataset.tab;
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   document.querySelectorAll('main section').forEach(s => s.classList.toggle('on', s.id === t));
   if (t === 'runs') loadRuns();
@@ -327,24 +500,44 @@ function envBadges(e) {
   const b = (ok, t) => `<span class="tag ${ok ? 'ok' : 'bad'}" title="${ok ? '正常' : '有問題'}">${t}</span> `;
   return b(e.venv && e.playwright, 'Python 環境') + b(e.node_modules, 'npm 套件') + b(e.claude, 'Claude Code');
 }
+// 總覽上方的流程進度：模型工坊 → 人工確認發布 → 遊戲整合（只算遊戲用到的模型）
+function flowStrip(o) {
+  const uses = o.models.filter(m => m.in_uses), n = uses.length, g = o.game;
+  const passed = uses.filter(m => m.released || (m.run && m.run.state === 'approved')).length;
+  const rel = uses.filter(m => m.released).length;
+  const gameOk = g.ready && g.project_exists;
+  const stages = [
+    ['① 模型工坊', n ? `${passed}／${n} 個通過` : '遊戲還沒指定要用的模型', n && passed === n ? 'done' : 'active', 'models'],
+    ['人工確認、發布', n ? `${rel}／${n} 個已發布` : '—', n && rel === n ? 'done' : (passed > rel ? 'active' : ''), 'models'],
+    ['② 遊戲整合', gameOk ? '可以開工' : (g.project_exists ? `還缺 ${g.missing.length} 個模型` : '遊戲資料夾不存在'), gameOk ? 'active' : '', 'game'],
+  ];
+  return stages.map(([t, d, cls, tab]) => `<button class="stage ${cls}" onclick="goTab('${tab}')"><span class="stage-n">${cls === 'done' ? '✓' : ''}</span>
+    <span class="stage-t">${t}</span><span class="stage-d">${esc(d)}</span></button>`).join('<span class="stage-arrow" aria-hidden="true"></span>');
+}
 async function loadOverview() {
-  try { OV = await api('/api/overview'); } catch (e) { $('ov-error').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
-  if (OV.error) { $('ov-error').innerHTML = `<div class="notice bad">${esc(OV.error)}</div>`; return; }
+  try { OV = await api('/api/overview'); } catch (e) { $('ov-error').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; $('ov-body').hidden = true; return; }
+  if (OV.error) { $('ov-error').innerHTML = `<div class="notice bad">${esc(OV.error)}</div>`; $('ov-body').hidden = true; return; }
   $('env').innerHTML = envBadges(OV.env);
   $('proj').innerHTML = (OV.project ? '' : '<option value="">（還沒有專案）</option>') +
     OV.projects.map(n => `<option value="${esc(n)}" ${n === OV.project ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  $('ov-body').hidden = !OV.project;
   if (!OV.project) {
     $('ov-error').innerHTML = '<div class="notice">還沒有專案。一個遊戲一個專案：按上方「＋ 新增專案」建立第一個，其他頁面才能使用。</div>';
     return;
   }
   $('ov-error').innerHTML = '';
+  $('ov-flow').innerHTML = flowStrip(OV);
   $('ov-next').innerHTML = nextSteps(OV);
-  $('ov-models').innerHTML = '<table><tr><th>模型</th><th>遊戲用到</th><th>最近一次製作</th><th>發布</th></tr>' +
-    OV.models.map(m => `<tr><td><a href="#" onclick="pickModel('${esc(m.name)}');goTab('models');return false">${esc(m.name)}</a>${m.reopen ? ' <span class="tag bad">被退件</span>' : ''}</td>
-      <td>${m.in_uses ? '是' : '<span class="muted">否</span>'}</td><td>${runText(m.run)}</td><td>${relText(m.released)}</td></tr>`).join('') + '</table>';
+  $('ov-models').innerHTML = OV.models.length ? '<div class="mgrid">' + OV.models.map(m => `<button class="mcard" onclick="pickModel('${esc(m.name)}');goTab('models')">
+      <span class="mcard-top"><span class="mname">${esc(m.name)}</span>${m.in_uses ? '<span class="tag">遊戲用到</span>' : ''}${m.reopen ? '<span class="tag bad">被退件</span>' : ''}</span>
+      <span class="mrow"><span class="k">製作</span>${runText(m.run)}</span>
+      <span class="mrow"><span class="k">發布</span>${relText(m.released)}</span></button>`).join('') + '</div>'
+    : '<div class="empty">還沒有模型。按右上角「＋ 新增模型」建立第一個。</div>';
   const g = OV.game;
-  $('ov-game').innerHTML = `<p>遊戲資料夾：<code>${esc(g.project_dir)}</code> ${g.project_exists ? '<span class="tag ok">存在</span>' : '<span class="tag bad">不存在</span>'}</p>
-    <p>能不能開工：${g.ready ? '<span class="tag ok">模型都已發布</span>' : '<span class="tag warn">還缺：' + esc(g.missing.join('、')) + '</span>'}</p>`;
+  $('ov-game').innerHTML = `<dl class="kv">
+    <dt>遊戲資料夾</dt><dd><code>${esc(g.project_dir)}</code> ${g.project_exists ? '<span class="tag ok">存在</span>' : '<span class="tag bad">不存在</span>'}</dd>
+    <dt>截圖清單</dt><dd><code>${esc(g.shots_spec)}</code> ${g.shots_exists ? '<span class="tag ok">存在</span>' : '<span class="tag bad">找不到</span>'}</dd>
+    <dt>能不能開工</dt><dd>${g.ready ? '<span class="tag ok">模型都已發布</span>' : '<span class="tag warn">還缺：' + esc(g.missing.join('、')) + '</span>'}</dd></dl>`;
   $('g-status').innerHTML = (!g.project_exists ? `<div class="notice bad">遊戲資料夾 <code>${esc(g.project_dir)}</code> 不存在，做遊戲會失敗。到「設定」改「遊戲資料夾」。</div>` : '') +
     (!g.ready ? `<div class="notice">還有模型沒發布（${esc(g.missing.join('、'))}），做遊戲會被擋下。</div>` : '');
   renderModelList();
@@ -367,7 +560,9 @@ async function newProject() {
 
 // ---------- 模型工坊 ----------
 function renderModelList() {
-  $('m-list').innerHTML = OV.models.map(m => `<button class="b ${m.name === CUR_MODEL ? 'on' : ''}" onclick="pickModel('${esc(m.name)}')">${esc(m.name)}
+  // 左邊清單的狀態點：被退件＝紅、已發布＝綠、通過待發布＝青、其他＝灰
+  const dot = m => m.reopen ? 'bad' : (m.released ? 'ok' : (m.run && m.run.state === 'approved' ? 'acc' : ''));
+  $('m-list').innerHTML = OV.models.map(m => `<button class="b ${m.name === CUR_MODEL ? 'on' : ''}" onclick="pickModel('${esc(m.name)}')"><span class="dot ${dot(m)}"></span><span class="li-name">${esc(m.name)}</span>
     ${m.released ? '<span class="tag ok">v' + m.released.version + '</span>' : ''}${m.reopen ? ' <span class="tag bad">退件</span>' : ''}</button>`).join('');
   if (CUR_MODEL) renderModelHead();
 }
@@ -386,27 +581,31 @@ function pickModel(name) {
 }
 function renderModelHead() {
   const m = OV.models.find(x => x.name === CUR_MODEL); if (!m || !$('m-head')) return;
-  $('m-head').innerHTML = `<div class="card"><h2>模型：${esc(m.name)}</h2>
-    <p>最近一次製作：${runText(m.run)} ${m.run ? `<a href="#" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}');return false">看紀錄</a>` : ''}　發布：${relText(m.released)}</p>
+  $('m-head').innerHTML = `<div class="card">
+    <div class="card-head"><h2>${esc(m.name)}</h2>${m.in_uses ? '<span class="tag">遊戲用到</span>' : ''}</div>
+    <dl class="kv"><dt>最近一次製作</dt><dd>${runText(m.run)} ${m.run ? `<a href="#" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}');return false">看紀錄</a>` : ''}</dd>
+      <dt>發布</dt><dd>${relText(m.released)}</dd></dl>
     ${m.todo.length ? `<div class="notice">${m.todo.join('、')} 還有【】沒填，AI 會照著範本文字做，請先填好。</div>` : ''}
-    ${m.reopen ? '<div class="notice bad">這個模型被遊戲階段退件，退件內容在下方「reopen.md」。重新做模型時 AI 會看到。</div>' : ''}
-    <h3>參考圖（給 AI 看的）</h3>
+    ${m.reopen ? '<div class="notice bad">這個模型被遊戲階段退件，退件內容在下方「reopen.md」。重新做模型時 AI 會看到。</div>' : ''}</div>
+    <div class="steps">
+      <div class="card"><div class="step-h"><span class="step-n">1</span><h3>讓 AI 做模型</h3></div>
+        <div class="row">最多 <input type="number" id="m-rounds" min="1" max="50" placeholder="設定值"> 輪</div>
+        <label class="help"><input type="checkbox" id="m-dry"> 乾跑（不呼叫 AI，只測流程，不能發布）</label>
+        <div class="push"><button class="b p" onclick="runModel()">開始做模型</button></div></div>
+      <div class="card"><div class="step-h"><span class="step-n">2</span><h3>自己看</h3></div>
+        <div class="stack"><button class="b" onclick="openLab()">開檢視器（可拖曳旋轉）</button>
+          ${m.run ? `<button class="b" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}')">看最近一次的截圖與審查意見</button>` : ''}</div></div>
+      <div class="card"><div class="step-h"><span class="step-n">3</span><h3>滿意就發布</h3></div>
+        <p class="help">發布條件：最近一次製作通過、不是乾跑、通過後 model.js 沒被改過</p>
+        <div class="row push"><button class="b p" onclick="release()">發布</button>
+          <button class="b d" onclick="unrelease()" ${m.released ? '' : 'disabled'}>撤回發布</button></div></div>
+    </div>
+    <div class="card"><h3>參考圖（給 AI 看的）</h3>
     ${m.refs.length ? `<div class="shots">${m.refs.map(r => `<figure><img src="${refUrl(m.name, r.file)}" alt="${esc(r.file)}" onclick="zoom(this.src)">
       <figcaption><b>${esc(r.file)}</b>${r.skip ? ` <span class="tag bad">${esc(r.skip)}，不會用</span>` : ''}</figcaption></figure>`).join('')}</div>
-      <p class="help">模型開發者與視覺審查者每一輪都會看這些圖。要參考哪些地方、哪些不用照做，寫在 spec.md；跟 spec.md 衝突時以 spec.md 為準。</p>`
-    : `<p class="help">沒有參考圖。要給 AI 看的話，把圖片放進 <code>models/${esc(m.name)}/</code>，檔名用 ref 開頭（例如 ref.png、ref-side.jpg；png／jpg／webp，最多 4 張、每張 5MB 以內），再重新整理這個頁面。</p>`}
-    <h3>1. 讓 AI 做模型</h3>
-    <div class="row">最多 <input type="number" id="m-rounds" min="1" max="50" placeholder="設定值"> 輪
-      <label><input type="checkbox" id="m-dry"> 乾跑（不呼叫 AI，只測流程，不能發布）</label>
-      <button class="b p" onclick="runModel()">開始做模型</button></div>
-    <h3>2. 自己看</h3>
-    <div class="row"><button class="b" onclick="openLab()">開檢視器（可拖曳旋轉）</button>
-      ${m.run ? `<button class="b" onclick="openRun('model-${esc(m.name)}-${esc(m.run.run_id)}')">看最近一次的截圖與審查意見</button>` : ''}</div>
-    <h3>3. 滿意就發布</h3>
-    <div class="row"><button class="b p" onclick="release()">發布</button>
-      <button class="b d" onclick="unrelease()" ${m.released ? '' : 'disabled'}>撤回發布</button>
-      <span class="muted">發布條件：最近一次製作通過、不是乾跑、通過後 model.js 沒被改過</span></div>
-    <h3>不滿意？</h3>
+      <p class="help" style="margin-top:10px">模型開發者與視覺審查者每一輪都會看這些圖。要參考哪些地方、哪些不用照做，寫在 spec.md；跟 spec.md 衝突時以 spec.md 為準。</p>`
+    : `<p class="help">沒有參考圖。要給 AI 看的話，把圖片放進 <code>models/${esc(m.name)}/</code>，檔名用 ref 開頭（例如 ref.png、ref-side.jpg；png／jpg／webp，最多 4 張、每張 5MB 以內），再重新整理這個頁面。</p>`}</div>
+    <div class="card"><h3>不滿意？</h3>
     <p class="help">把意見寫進下方「human-feedback.md」再做一次；會一再出現的錯，存成永久規則：</p>
     <div class="row"><input type="text" id="m-check" style="flex:1;min-width:240px" placeholder="例如：刀口要與握柄平行，不是垂直">
       <button class="b" onclick="addCheck(CUR_MODEL,'m-check')">加入這個模型的清單</button></div></div>`;
@@ -486,6 +685,7 @@ async function pollJob() {
     $('c-state').innerHTML = j.running ? `<span class="warn">執行中：${esc(j.cmd)}</span>（${esc(j.started)} 開始）` :
       (j.cmd ? `上一個工作：${esc(j.cmd)}，${j.rc === 0 ? '<span class="ok">結束</span>' : '<span class="bad">結束（回傳碼 ' + j.rc + '）</span>'}` : '沒有工作在跑');
     $('c-stop').style.display = j.running ? '' : 'none';
+    $('console').classList.toggle('running', j.running);           // 執行中時輸出面板的指示燈會閃
     if (jobWasRunning && !j.running) { loadOverview(); if ($('runs').classList.contains('on')) loadRuns(); }
     jobWasRunning = j.running;
   } catch (e) { $('c-state').textContent = '連不到介面伺服器（是不是關掉了？）'; }
@@ -497,7 +697,7 @@ async function loadRuns() {
   const runs = await api('/api/runs');
   const kind = {model: '模型', game: '遊戲', gates: '只跑關卡'};
   $('r-list').innerHTML = runs.length ? runs.map(r => `<button class="b ${r.id === CUR_RUN ? 'on' : ''}" onclick="openRun('${esc(r.id)}')">
-    <span class="tag">${kind[r.kind]}</span> ${esc(r.id)}<br><span class="muted">${esc(r.state || '')}${r.dry_run ? '・乾跑' : ''}${r.rounds ? '・' + r.rounds + ' 輪' : ''}</span></button>`).join('')
+    <span class="li-name">${esc(r.id)}</span><span class="li-sub"><span class="tag">${kind[r.kind]}</span> ${esc(r.state || '')}${r.dry_run ? '・乾跑' : ''}${r.rounds ? '・' + r.rounds + ' 輪' : ''}</span></button>`).join('')
     : '<p class="muted">還沒有任何紀錄。</p>';
 }
 async function openRun(id) {
@@ -615,6 +815,16 @@ async function refreshAll() {
   if (ed && ed._dirty && ed._dirty() && !confirm('模型的檔案還沒存，重新整理會丟掉修改，確定？')) return;
   await loadOverview(); if (CUR_MODEL) pickModel(CUR_MODEL); pollJob();
 }
+// ---------- 配色（深色／淺色）----------
+function themeLabel() { $('theme-btn').textContent = document.documentElement.dataset.theme === 'light' ? '☾ 深色' : '☀ 淺色'; }
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('gdf-theme', t); } catch (e) {}       // 存不了（例如無痕模式）就只是下次不記得
+  themeLabel();
+}
+themeLabel();
+
 loadOverview().then(() => { buildGameEditor(); buildAdvanced(); });
 pollJob();
 </script>
