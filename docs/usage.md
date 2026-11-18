@@ -8,7 +8,7 @@
 
 ## 圖形化介面（不想打指令就用這個）
 
-雙擊根目錄的 `gui.bat`（或執行 `.venv/Scripts/python.exe gui/server.py`），瀏覽器會自動打開 `http://127.0.0.1:8765/`。下面所有指令與要寫的檔案，都能在介面上完成：
+雙擊根目錄的 `gui.bat`（PowerShell：`.\gui.ps1`，被執行原則擋下時改用 `powershell -ExecutionPolicy Bypass -File .\gui.ps1`；或直接執行 `.venv/Scripts/python.exe gui/server.py`），瀏覽器會自動打開 `http://127.0.0.1:8765/`。下面所有指令與要寫的檔案，都能在介面上完成：
 
 | 分頁 | 能做什麼 |
 |---|---|
@@ -21,7 +21,7 @@
 
 介面只接受本機連線，只能改你該寫的檔案（model.js 等由 AI 管的檔案、工具內建的 agents/ 只能看），也只能執行協調器的既有指令。
 
-關閉介面：在 `gui.bat` 開出的黑色視窗按 Ctrl+C。
+關閉介面：在 `gui.bat`（或 `gui.ps1`）開出的視窗按 Ctrl+C。
 
 ## 0. 專案：一個遊戲一個資料夾
 

@@ -10,6 +10,7 @@ game-dev-flow/                  ← 工具本身
 ├── docs/                       ← 說明文件
 ├── orchestrator.py             ← 協調器（所有指令的入口）
 ├── gui.bat                     ← 雙擊啟動圖形化介面
+├── gui.ps1                     ← 同上，PowerShell 版（右鍵「用 PowerShell 執行」或 .\gui.ps1）
 ├── gui/                        ← 圖形化介面（server.py 本機伺服器、index.html 網頁）
 ├── package.json                ← 模型檢視器需要 three 與 esbuild（根目錄 npm install）
 ├── requirements.txt            ← Python 套件（playwright）
